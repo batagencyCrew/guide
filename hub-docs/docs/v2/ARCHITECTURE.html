@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Bambou Hub v2 — Architecture – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Bambou Hub v2 — Architecture</h1><p>HUB v2 documentation · <code>docs/v2/ARCHITECTURE.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/docs/v2/ARCHITECTURE.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>The hub is the single place to watch and control every automation script on every
+VPS. It does <strong>not</strong> run automation logic: it gathers logs, worker health,
+metrics, costs, balances and proxy health, it edits each script's config files,
+it sends commands, it raises alerts, and it backs up the code.</p>
+<pre><code> VPS (one script per site)                                  Hub VPS
+┌──────────────────────────────────────┐        ┌──────────────────────────────────────┐
+│ your script                          │        │ FastAPI hub  (hub/)                  │
+│  └─ bambouhub SDK (Python / Node)    │        │  ├─ /api/*        dashboard + bots   │
+│       logs · workers · metrics       │  unix  │  ├─ /api/agent/v2 agent HTTP API     │
+│       costs · balances · proxies     │ socket │  ├─ /ws/site      agent push socket  │
+│       issues · command handlers      ├───────►│  ├─ /ws/bot       bot event stream   │
+│ bambou-agent  (agent2/)              │ WSS +  │  ├─ /api/agent/*  v1 compatibility   │
+│  ├─ hub connection + disk buffer     │ HTTPS  │  ├─ alert engine  (tasks thread)     │
+│  ├─ supervises the script process    │◄──────►│  └─ backup transfers → rclone        │
+│  ├─ syncs config.json/.env/proxies   │        │ Postgres 16                          │
+│  ├─ host metrics                     │        └──────────┬───────────────────────────┘
+│  └─ codebase backups                 │                   │ HTTPS + WSS (service token)
+└──────────────────────────────────────┘        ┌──────────▼───────────────────────────┐
+                                                │ BambouBot (Discord + Telegram)       │
+                                                │  hub commands + alert delivery       │
+                                                └──────────────────────────────────────┘
+</code></pre>
+</section><section id="components"><h2>Components</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hub/</code></td>
+<td>FastAPI app, Postgres schema (<code>hub/migrations</code>), alert engine, backups, v1 importer</td>
+</tr>
+<tr>
+<td><code>agent2/</code></td>
+<td><code>bambou-agent</code>: one per VPS; supervises the script, syncs files, buffers, backs up</td>
+</tr>
+<tr>
+<td><code>sdk/python</code>, <code>sdk/node</code></td>
+<td>Libraries a script imports to report and to receive commands</td>
+</tr>
+<tr>
+<td><code>frontend/</code></td>
+<td>React dashboard (served by the hub)</td>
+</tr>
+<tr>
+<td><code>BambouBot/</code></td>
+<td>Discord + Telegram bot, with the <code>hub</code> module talking to <code>/api</code></td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="data-model-postgres"><h2>Data model (Postgres)</h2>
+<ul>
+<li><strong>Identity</strong>: <code>users</code> (role + extra permissions + optional site scope), <code>sessions</code>
+  (revocable cookie sessions), <code>service_tokens</code> (bot), <code>bot_links</code> (chat user ↔ hub user),
+  <code>audit_log</code> (every change, every secret reveal).</li>
+<li><strong>Inventory</strong>: <code>sites</code>, <code>site_tokens</code> (rotatable, several active allowed),
+  <code>workers</code> (latest state), <code>agent_reports</code> (host + process + backup state),
+  <code>site_capabilities</code> (custom commands and files the script declared).</li>
+<li><strong>Telemetry</strong> — kept forever, monthly partitions: <code>event_logs</code>, <code>worker_samples</code>,
+  <code>metrics</code>. <code>cost_events</code> (dedup by receipt), <code>account_balances</code> (latest per provider),
+  <code>proxy_observations</code>.</li>
+<li><strong>Config files</strong>: <code>site_files</code> (exact text, encrypted; revision + applied revision),
+  <code>site_file_history</code>.</li>
+<li><strong>Control</strong>: <code>commands</code> (pending → delivered → running → completed/failed/superseded).</li>
+<li><strong>Alerts</strong>: <code>alert_rules</code>, <code>alerts</code> (deduplicated by key), <code>alert_deliveries</code>.</li>
+<li><strong>Backups</strong>: <code>backup_destinations</code> (rclone remotes), <code>site_backup_config</code>, <code>backups</code>,
+  <code>backup_files</code>, <code>backup_transfers</code>.</li>
+</ul>
+</section><section id="permissions"><h2>Permissions</h2>
+<p><code>hub/permissions.py</code> defines every permission (<code>sites:view</code>, <code>control:lifecycle</code>,
+<code>config:edit</code>, <code>secrets:reveal</code>, …) and the role defaults (<code>owner</code>, <code>admin</code>,
+<code>operator</code>, <code>viewer</code>). A user may get extra permissions and may be limited to some
+sites. The <strong>same check</strong> runs for the dashboard and for the bots: the bot acts <em>as</em>
+the linked hub user (<code>X-Bot-User</code>), so a Telegram user can never do more than their
+hub account.</p>
+</section><section id="config-files"><h2>Config files</h2>
+<p>The hub manages any file in the script root: <code>config.json</code>, <code>.env</code>, <code>proxies.txt</code>,
+JSON proxy pools, or plain text. It keeps the <strong>exact text</strong> so comments and order
+survive. Reads are masked (secret-looking keys and proxy passwords become
+<code>********</code>); <code>secrets:reveal</code> shows real values and is audited. Editing a masked
+document keeps any value left as <code>********</code>.</p>
+<p>Sync is revisioned. Hub edits create revision N+1 and are pushed to the agent,
+which writes atomically and acknowledges with the file's sha256. Hand edits on the
+VPS are detected and pushed up; if both sides changed, the hub version wins on disk
+and the local text is kept in history (<code>local-conflict</code>), so nothing is lost.</p>
+</section><section id="commands"><h2>Commands</h2>
+<p><code>start · stop · restart · pause · resume · set_workers{count} · reload_config ·
+backup · custom:&lt;name&gt;{args}</code>. Lifecycle commands set the site's desired state and
+supersede older unacknowledged lifecycle commands (no stale replays). Commands
+are pushed over the WebSocket instantly, and are also delivered by polling.</p>
+</section><section id="alerts"><h2>Alerts</h2>
+<p>Rules (<code>hub/alerts.py</code>): site offline, worker idle/error/silent, error spike,
+daily cost, low balance, backup failed/stale, proxies failing, plus
+<strong>script-reported issues</strong> (<code>hub.issue(...)</code> in the SDK). Alerts are deduplicated
+by key, resolve automatically when the condition clears, can be acknowledged or
+muted, and are delivered through the bot to configured Discord/Telegram channels.</p>
+</section><section id="backups"><h2>Backups</h2>
+<p>The agent packs the script folder (<code>.git</code>, <code>node_modules</code>, venvs excluded by
+default) and streams it to the hub. The hub copies it with rclone to every
+destination as <code>&lt;remote&gt;:&lt;folder&gt;/&lt;site-slug&gt;/&lt;site-slug&gt;-&lt;UTC timestamp&gt;.tar.gz</code>
+— one folder per script inside your parent folder — keeps the newest
+<code>keep_count</code> archives, and deletes its local copy once all copies succeeded.</p>
+</section><section id="compatibility-with-v1"><h2>Compatibility with v1</h2>
+<p>Sites imported from v1 keep their ids and token hashes. The v1 agent API
+(<code>/api/agent/heartbeat</code>, <code>/config</code>, <code>/commands</code>, <code>/errors</code>, <code>/statistics</code>,
+<code>/ai-usage</code>, backups) is served on top of v2 storage, so deployed agents keep
+working until they are moved to <code>bambou-agent</code>.</p></section></main>
+<footer>Published from HubDashboard-v2/docs/v2/ARCHITECTURE.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

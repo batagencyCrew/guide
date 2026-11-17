@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Hub API reference (v2) – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Hub API reference (v2)</h1><p>HUB v2 documentation · <code>docs/v2/API.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/docs/v2/API.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>Base <code>/api</code>. Dashboard and bot calls authenticate with a <strong>session cookie</strong> (dashboard)
+or the <strong>bot service token</strong> plus <code>X-Bot-User: &lt;platform&gt;:&lt;id&gt;</code> (bot). Agent calls use
+<code>Authorization: Bearer &lt;site token&gt;</code> only under <code>/api/agent/*</code> and <code>/ws/site</code>.
+All errors are <code>{"detail": "..."}</code>. Timestamps are ISO 8601 UTC.</p>
+<p>Startup bootstrap: if <code>HUB_BOOTSTRAP_OWNER</code> and <code>HUB_BOOTSTRAP_PASSWORD</code> (≥12 chars) are
+set and the <code>users</code> table is empty, the hub creates that initial <code>owner</code> account once and
+records <code>user.bootstrap</code> in <code>audit_log</code>. Once any user exists, those variables are a no-op.</p>
+</section><section id="auth-apiauth"><h2>Auth — <code>/api/auth</code></h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/auth/login</code> <code>{username,password}</code></td>
+<td>sets HttpOnly cookie; returns user + expiry</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/logout</code></td>
+<td>revokes the session server-side</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/me</code></td>
+<td>current user, role, permissions, scope</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/password</code> <code>{current_password,new_password}</code></td>
+<td>revokes all sessions</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/sessions</code> · DELETE <code>/auth/sessions/{id}</code></td>
+<td>list / revoke sessions</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/catalog</code></td>
+<td>all permission names and role defaults</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="sites-apisites"><h2>Sites — <code>/api/sites</code></h2>
+<p><code>{site_ref}</code> accepts id, slug, or (case-insensitive) name — bots use names.</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/sites</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites</code> <code>{name,slug?,url?,description?}</code> → <code>{site, agent_token}</code></td>
+<td>sites:create</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/sites/{ref}</code> <code>{name?,url?,description?,crash_restart?}</code></td>
+<td>sites:edit</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/sites/{ref}?confirm=&lt;slug&gt;&amp;force=false</code></td>
+<td>sites:delete (<code>409</code> if backup uploads/transfers/downloads are active unless <code>force=true</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/tokens</code> · POST <code>?revoke_existing=</code> → <code>{agent_token}</code></td>
+<td>sites:create</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/workers?include_stale=</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/workers/{worker_id}/samples?period=24h</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/commands</code> <code>{action,args}</code></td>
+<td>per action (see below)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/commands?limit=</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/stats?period=24h</code></td>
+<td>sites:view</td>
+</tr>
+</tbody>
+</table></div>
+<p>Site summary: <code>{id, slug, name, url, description, desired_state, crash_restart, health:
+healthy|degraded|offline, online, last_seen_at, workers: {running,idle,error,stopped,
+starting,unknown}, worker_total, host, process, agent_version, capabilities: {commands,
+files, sdk, config_schema}}</code>.</p>
+<p>Commands: <code>start stop restart</code> (control:lifecycle), <code>pause resume</code> (control:pause),
+<code>set_workers {count}</code> (control:workers), <code>reload_config</code> (config:edit),
+<code>custom:&lt;name&gt; {args}</code> (control:custom), <code>backup</code> (backups:request).
+Response: <code>{id, action, args, status, created_at, delivered_at, completed_at, result,
+source, site_name, agent_online}</code>. Statuses: <code>pending delivered running completed failed
+superseded</code>.</p>
+</section><section id="presets-dynamic-configuration-apisitesref"><h2>Presets &amp; dynamic configuration — <code>/api/sites/{ref}</code></h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/presets</code> <code>{ai_api_key?, key_field?}</code> → <code>{presets:[{id,name,archived}]}</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/config-schema?reveal=false</code> → <code>{fields, files, revealed}</code></td>
+<td>sites:view (<code>secrets:reveal</code> when <code>reveal=true</code>, audited as <code>config.reveal</code>)</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/sites/{ref}/config-values</code> <code>{values, base_revisions?}</code></td>
+<td>config:edit</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>Presets (<code>POST /sites/{ref}/presets</code>)</strong>: calls <code>https://bambouaibot.com/api/assistant/presets</code>
+  server-side (<code>follow_redirects=false</code>, <code>verify=true</code>, <code>trust_env=false</code>, 10 s deadline,
+  1 MiB cap, max 1,000 items). Explicit <code>ai_api_key: null</code> is rejected (<code>422</code>); omit
+  <code>ai_api_key</code> to decrypt the site's saved key in memory (from <code>key_field</code>, schema fields
+  marked <code>preset_key: true</code>, or <code>ai_api_key</code>/<code>AI_API_KEY</code>/<code>ai.api_key</code>/<code>BAMBOU_API_KEY</code>
+  across <code>config.json</code> and <code>.env</code>). The key is never returned to the browser. Upstream
+  errors map cleanly: <code>401/403 → 400</code>, <code>429 → 503</code>, timeout → <code>504</code>, invalid/other → <code>502</code>.</li>
+<li><strong>Dynamic config schema (<code>GET /sites/{ref}/config-schema</code> &amp; <code>PATCH /sites/{ref}/config-values</code>)</strong>:
+  merges any managed <code>.bambou-config.schema.json</code> with fields declared via the SDK
+  (<code>hub.declare_config_schema</code> / <code>hub.declareConfigSchema</code>). Supported field types:
+  <code>string | number | integer | boolean | select | preset | secret | multiline</code> with
+  <code>key</code> (dotted JSON path or <code>.env</code> var), <code>label</code>, <code>file</code>, <code>required</code>, <code>default</code>, <code>min</code>,
+  <code>max</code>, <code>options</code>, <code>description</code>, <code>secret</code>, <code>restart_required</code>, <code>group</code>, <code>preset_key</code>.
+  <code>PATCH /config-values</code> validates types/bounds, enforces optional per-file <code>base_revisions</code>
+  (<code>409</code> on conflict), supports secret <code>{action: "preserve" | "replace" | "clear" | "delete", value?}</code>
+  (or <code>"********"</code> to preserve), writes atomically into the target <code>site_files</code>, and pushes
+  <code>files_changed</code> to <code>bambou-agent</code>.</li>
+</ul>
+</section><section id="overview-apioverview"><h2>Overview — <code>/api/overview</code></h2>
+<p><code>{totals:{sites,online,healthy,degraded,offline,workers_running,workers_idle,
+workers_error,errors_24h,cost_today:{USD:n}}, sites:[summary], alerts:[alert]}</code></p>
+</section><section id="logs-metrics"><h2>Logs &amp; metrics</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/logs?site=&amp;worker=&amp;level=debug&amp;q=&amp;before_id=&amp;since=&amp;until=&amp;limit=</code></td>
+<td>keyset paginated; <code>next_before_id</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/metrics?period=</code></td>
+<td>names, kinds, sample counts</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/metrics/{name}?period=&amp;worker=</code></td>
+<td>bucketed series</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/costs?site=&amp;period=&amp;group_by=day|provider|category|site|worker</code></td>
+<td>totals per currency</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/costs/events?site=&amp;limit=</code></td>
+<td>individual cost entries</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/balances?site=</code></td>
+<td>latest per provider; <code>low</code> flag</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/proxy-health?period=</code></td>
+<td>per proxy: observations, ok/slow/blocked/auth/timeout, success_rate, last_state, health</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Log ingestion &amp; visibility:</strong> log ingestion (<code>POST /api/agent/v2/batch</code>, <code>/ws/site</code>, and
+v1 <code>POST /api/agent/errors</code>) is intentionally permissive for internal troubleshooting—no
+regex/credential filtering or silent level drops are applied (level aliases such as <code>warn</code>
+and <code>fatal</code> normalize cleanly, and traceback-only entries keep their exception). Access to
+logs is strictly gated at read time by <code>sites:view</code> and each user's <code>site_scope</code>.</p>
+</section><section id="config-files-apisitesreffiles"><h2>Config files — <code>/api/sites/{ref}/files</code></h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/files</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/files</code> <code>{path,format?,content,secret_keys}</code></td>
+<td>config:edit</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/files/content?path=&amp;reveal=</code></td>
+<td>sites:view / secrets:reveal</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/files/content?path=</code> <code>{content,base_revision,format?,secret_keys?}</code></td>
+<td>config:edit</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/files/content?path=</code> <code>{base_revision,set,delete,add_proxies,remove_proxies}</code></td>
+<td>config:edit</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/files/validate?path=</code> <code>{content}</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/files?path=</code></td>
+<td>config:edit</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/files/history?path=</code> · <code>/files/history/{id}?reveal=</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/files/restore?path=&amp;revision=</code></td>
+<td>config:edit</td>
+</tr>
+</tbody>
+</table></div>
+<p>File view: <code>{path, format, revision, applied_revision, applied_at, apply_error, in_sync,
+sha256, secret_keys, updated_at, content, parsed, parse_error, revealed}</code>.
+<code>content</code> is masked unless <code>reveal=true</code> (including fields marked <code>secret</code> in the site's
+<code>config_schema</code>); <code>parsed</code> is the structured view (env items, proxy entries, JSON document).
+Writes return the masked view. <code>409</code> when <code>base_revision</code> is stale.</p>
+</section><section id="proxies-apisitesrefproxies"><h2>Proxies — <code>/api/sites/{ref}/proxies</code></h2>
+<p>Backed directly by the site's managed <code>proxies.txt</code> (<code>proxies</code>) or <code>proxies.json</code>
+(<code>proxy-json</code>) in <code>site_files</code> (single source of truth; comments and JSON object style are
+preserved, and every mutation increments the file revision, writes <code>audit_log</code>, and pushes
+<code>files_changed</code> to <code>bambou-agent</code>). Proxy <code>id</code> is the 16-hex SHA-256 key of
+<code>scheme|host|port|username</code>, matching <code>/proxy-health</code>.</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/proxies?path=&amp;reveal=false</code></td>
+<td>sites:view (<code>secrets:reveal</code> when <code>reveal=true</code>, audited)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/proxies</code> <code>{url? \| (host,port,scheme?), username?, password?, path?, base_revision?}</code></td>
+<td>proxies:manage</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/sites/{ref}/proxies/{proxy_id}?path=</code> <code>{url?, scheme?, host?, port?, username?, password?, base_revision?}</code></td>
+<td>proxies:manage</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/sites/{ref}/proxies/{proxy_id}?path=&amp;base_revision=</code></td>
+<td>proxies:manage</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/proxies/import</code> <code>{content, proxy_type="http", dry_run=true, path?, base_revision?}</code></td>
+<td>proxies:manage</td>
+</tr>
+</tbody>
+</table></div>
+<p>Batch import (<code>POST /proxies/import</code>) accepts <code>.txt</code>/<code>.list</code> text (<code>≤512 KiB</code>, <code>≤1,000</code>
+entries, up to <code>1,000</code> total proxies per site), supports <code>host:port</code>, <code>host:port:user:pass</code>,
+and <code>scheme://user:pass@host:port</code>, normalizes IDNA domains, IPv4, and compressed IPv6,
+returns <code>{total, valid, duplicates, imported, can_import, dry_run, errors, entries, path,
+revision}</code>, and commits atomically only when <code>dry_run=false</code> and <code>errors</code> is empty.</p>
+</section><section id="backups"><h2>Backups</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/backup-remotes</code></td>
+<td>backups:manage</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/backup-storage</code> → <code>{staging_dir, used_bytes, reserved_bytes, max_bytes, free_bytes, disk_total_bytes, headroom_bytes, max_upload_bytes, cached_files, max_cached_files, retention_hours, active_downloads, active_uploads}</code></td>
+<td>backups:manage</td>
+</tr>
+<tr>
+<td>GET/POST/PUT/PATCH/DELETE</td>
+<td><code>/backup-destinations[/{id}]</code></td>
+<td>sites:view (<code>GET</code>) / backups:manage</td>
+</tr>
+<tr>
+<td>GET/PUT</td>
+<td><code>/sites/{ref}/backups/config</code></td>
+<td>sites:view / backups:manage</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/backups/request</code></td>
+<td>backups:request</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/backups?limit=</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/sites/{ref}/backups/{id}/retry</code></td>
+<td>backups:manage</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/sites/{ref}/backups/{id}/local</code> → <code>{ok, evicted, backup_id}</code> (<code>409</code> if uploading, queued/running transfer, or active download)</td>
+<td>backups:manage</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/sites/{ref}/backups/{id}/download</code> (holds a download lease until streaming completes)</td>
+<td>backups:download</td>
+</tr>
+</tbody>
+</table></div>
+<p>Staging quotas are controlled via <code>HUB_BACKUP_MAX_UPLOAD_BYTES</code> (default 4 GiB),
+<code>HUB_BACKUP_MAX_STAGING_BYTES</code> (default 20 GiB), <code>HUB_BACKUP_MAX_CACHED</code> (default 1,000),
+and a <code>512 MiB</code> free-disk headroom check; oldest non-leased <code>failed</code>/<code>partial</code> copies are
+evicted automatically when space is needed, or retained for <code>72</code> hours (<code>LOCAL_KEEP_HOURS</code>).</p>
+</section><section id="alerts"><h2>Alerts</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/alerts?status=active|open|acknowledged|resolved|all&amp;site=&amp;limit=</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/alerts/{id}/ack</code> · <code>/mute</code> <code>{minutes}</code> · <code>/resolve</code></td>
+<td>alerts:ack</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/alerts/rules</code> → <code>{kinds, rules}</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>POST/PUT/DELETE</td>
+<td><code>/alerts/rules[/{id}]</code></td>
+<td>alerts:manage</td>
+</tr>
+<tr>
+<td>GET/PUT</td>
+<td><code>/alerts/channels</code> (default delivery channels)</td>
+<td>sites:view / alerts:manage</td>
+</tr>
+</tbody>
+</table></div>
+<p>Rule kinds: <code>site_offline worker_idle worker_error worker_silent error_spike cost_daily
+balance_low backup_failed proxy_failing issue</code>.</p>
+</section><section id="users-bots"><h2>Users &amp; bots</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Permission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET/POST</td>
+<td><code>/users</code> · PATCH <code>/users/{id}</code></td>
+<td>users:manage</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/me/bot-link-code</code> → <code>{code}</code> (10 min, shown once)</td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>GET/DELETE</td>
+<td><code>/me/bot-links[/{platform}/{id}]</code></td>
+<td>sites:view</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/bot-links</code></td>
+<td>bots:manage</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/service-tokens/bot</code> → <code>{token}</code>; GET <code>/service-tokens</code>; DELETE <code>/service-tokens/{id}</code></td>
+<td>bots:manage</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/audit?site=&amp;actor=&amp;action=&amp;before_id=&amp;limit=</code></td>
+<td>users:audit</td>
+</tr>
+</tbody>
+</table></div>
+<p>Bot-only (<code>Authorization: Bearer hbt_…</code>): <code>POST /api/bot/link {platform,platform_user,code}</code>,
+<code>POST /api/bot/identity</code>, <code>POST /api/bot/unlink</code>, <code>GET /api/bot/deliveries</code>,
+<code>POST /api/bot/deliveries/{id}</code>.</p>
+</section><section id="agent-site-token"><h2>Agent (site token)</h2>
+<p>HTTP: <code>POST /api/agent/v2/batch</code>, <code>GET /api/agent/v2/commands</code>,
+<code>POST /api/agent/v2/commands/{id}/ack</code>, <code>GET /api/agent/v2/files</code>,
+<code>POST /api/agent/v2/files/ack</code>, <code>POST /api/agent/v2/files/push</code>,
+<code>GET /api/agent/v2/whoami</code>, <code>GET /api/agent/v2/backups/config</code>,
+<code>POST /api/agent/v2/backups/upload?source=&amp;command_id=&amp;size=</code>.
+WebSocket <code>GET /ws/site</code> (Authorization header) carries the same batch/command traffic.</p>
+<p>The v1 agent compatibility API (<code>/api/agent/heartbeat</code>, <code>/config</code>, <code>/local-sync</code>, <code>/errors</code>,
+<code>/commands</code>, <code>/commands/{id}/ack</code>, <code>/statistics</code>, <code>/ai-usage</code>, <code>/chats</code>, <code>/backup-config</code>,
+<code>/backup-status</code>, <code>/backup-requests</code>, <code>/backup-requests/{id}/ack</code>, <code>/backups/upload</code>) maps
+cleanly onto v2 storage: heartbeat <code>degraded</code> status updates site health, <code>local-sync</code>
+enforces <code>expected_revision</code> (<code>409</code>), proxy error codes populate <code>proxy_observations</code>,
+<code>chats</code> and <code>ai-usage</code> deduplicate by <code>event_id</code> (<code>agent_receipts</code>, <code>409</code> on payload
+mismatch), <code>backup-status</code> accepts ISO 8601 strings or Unix timestamps, and on-demand
+uploads complete the matching <code>backup</code> command (0-byte uploads are rejected with <code>400</code>).</p></section></main>
+<footer>Published from HubDashboard-v2/docs/v2/API.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

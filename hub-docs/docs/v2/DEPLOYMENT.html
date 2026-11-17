@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Deployment and operations (hub host) – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Deployment and operations (hub host)</h1><p>HUB v2 documentation · <code>docs/v2/DEPLOYMENT.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/docs/v2/DEPLOYMENT.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>How v2 runs on the hub host, how it got there from v1, and how to operate,
+update and roll back. Run commands as root.</p>
+</section><section id="layout"><h2>Layout</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Public URL</td>
+<td><code>https://bamboubot.duckdns.org</code> (Caddy, Let's Encrypt)</td>
+</tr>
+<tr>
+<td>Hub service</td>
+<td><code>bambou-hub.service</code>, uvicorn <code>hub.main:app</code> on <strong>127.0.0.1:8020</strong> (port 8000 is used by another service on this box)</td>
+</tr>
+<tr>
+<td>Hub code</td>
+<td><code>/opt/bambou-hub</code> (root-owned, read-only to the service)</td>
+</tr>
+<tr>
+<td>Hub env</td>
+<td><code>/etc/bambou-hub.env</code> (mode 600)</td>
+</tr>
+<tr>
+<td>Hub data</td>
+<td><code>/var/lib/bambou-hub</code>: <code>hub-secret.key</code>, <code>rclone.conf</code>, <code>backups/</code> staging (owned by <code>bambou</code>)</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>Postgres 16, database <code>bambouhub</code>, role <code>bambouhub</code></td>
+</tr>
+<tr>
+<td>Bot service</td>
+<td><code>bambou.service</code>: one Node process for Discord and Telegram, code in <code>/opt/bambou-bot</code></td>
+</tr>
+<tr>
+<td>Bot env</td>
+<td><code>/opt/bambou-bot/.env</code> (mode 600): bot tokens plus <code>HUB_URL</code>, <code>HUB_BOT_TOKEN</code></td>
+</tr>
+<tr>
+<td>Bot state</td>
+<td><code>/var/lib/bambou/access.json</code> (merged approvals from both old bots)</td>
+</tr>
+<tr>
+<td>v1 backup</td>
+<td><code>/var/backups/hub-v1-&lt;timestamp&gt;/</code> (path in <code>/root/.hub-v1-backup-path</code>)</td>
+</tr>
+<tr>
+<td>Disabled v1 units</td>
+<td><code>hub-dashboard.service</code>, <code>hub-dashboard-tunnel.service</code>, <code>bambou-discord.service</code>, <code>bambou-telegram.service</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><code>/etc/bambou-hub.env</code>:</p>
+<pre><code class="language-dotenv">HUB_DATABASE_URL=postgresql://bambouhub:&lt;generated&gt;@127.0.0.1:5432/bambouhub
+HUB_DATA_DIR=/var/lib/bambou-hub
+HUB_SECURE_COOKIES=true
+HUB_RCLONE_CONFIG=/var/lib/bambou-hub/rclone.conf
+HUB_FRONTEND_DIR=/opt/bambou-hub/frontend/dist
+</code></pre>
+<p><strong>Back up <code>/var/lib/bambou-hub/hub-secret.key</code> together with the database.</strong> Stored
+config files (including <code>.env</code> secrets) are encrypted with it. A database restore
+without this key cannot decrypt them.</p>
+</section><section id="logging-in"><h2>Logging in</h2>
+<p>User <code>admin</code> (role owner), with the same password as v1's <code>HUB_ADMIN_PASSWORD</code>.
+Create more users under <strong>Users</strong> in the dashboard, or from the command line:</p>
+<pre><code class="language-bash">cd /opt/bambou-hub &amp;&amp; set -a &amp;&amp; . /etc/bambou-hub.env &amp;&amp; set +a
+.venv/bin/python -m hub.cli create-user &lt;name&gt; --role operator    # prompts for a password
+</code></pre>
+<p>Running <code>create-user</code> for an existing name resets its password.</p>
+</section><section id="how-the-v1-v2-switch-was-done-for-reference-repeat"><h2>How the v1 → v2 switch was done (for reference / repeat)</h2>
+<ol>
+<li><strong>Backup.</strong> Copied v1's <code>hub.sqlite3</code> (online <code>.backup</code>), <code>encryption.key</code>,
+   <code>signing.key</code>, <code>/etc/hub-dashboard.env</code>, the Caddyfile and <code>rclone.conf</code> to
+   <code>/var/backups/hub-v1-&lt;timestamp&gt;/</code>.</li>
+<li><strong>Install.</strong> Rsynced the repo to <code>/opt/bambou-hub</code> and created its venv:
+   <code>pip install -r hub/requirements.txt</code>. Built the dashboard with
+   <code>cd frontend &amp;&amp; npm ci &amp;&amp; npm run build</code>.</li>
+<li><strong>Database.</strong> Ran <code>deploy/setup-postgres.sh bambouhub bambouhub</code>, wrote
+   <code>/etc/bambou-hub.env</code>, then ran <code>hub.cli migrate</code>.</li>
+<li><strong>Owner.</strong> Ran <code>hub.cli create-user admin --role owner</code> with v1's admin password.</li>
+<li><strong>Parallel check.</strong> Started <code>bambou-hub</code> on :8020 next to v1 (:8010), then:
+   * replayed every v1 agent call against it with a temporary token
+   * logged in through a browser and opened every screen</li>
+<li><strong>Freeze and final import.</strong>
+   * Stopped <code>hub-dashboard</code> and its tunnel.
+   * Took a final SQLite backup.
+   * Recreated the <code>bambouhub</code> schema and ran
+     <code>hub.cli import-v1 --sqlite &lt;final backup&gt; --key &lt;encryption.key&gt;</code>.
+   * The import brought over 4 sites with their ids and agent-token hashes, managed
+     <code>config.json</code> and <code>proxies.txt</code>, 2,001 log entries, 9 commands and 36,001 metric
+     points.</li>
+<li><strong>Switch.</strong> In <code>/etc/caddy/Caddyfile</code>, the <code>bamboubot.duckdns.org</code> block's
+   <code>reverse_proxy 127.0.0.1:8010</code> became <code>127.0.0.1:8020</code>. Ran <code>caddy validate</code>, then
+   <code>systemctl reload caddy</code>. Original saved as <code>Caddyfile.bak-before-hub-v2</code>.</li>
+<li><strong>Boot.</strong> Enabled <code>bambou-hub</code>; disabled <code>hub-dashboard</code> and <code>hub-dashboard-tunnel</code>.</li>
+<li><strong>Agents.</strong> The two live VPS agents reconnected on their own through the v1
+   compatibility API, with no token changes. Every call returned 200 or 201.</li>
+<li><strong>Bots.</strong><ul>
+<li>Copied <code>BambouBot/</code> to <code>/opt/bambou-bot</code>, keeping its <code>.env</code>, and created a
+  bot token with <code>hub.cli bot-token</code>.</li>
+<li>Appended <code>HUB_URL</code> and <code>HUB_BOT_TOKEN</code> to <code>.env</code>.</li>
+<li>Merged the two old access files with <code>npm run migrate:access … --write</code>
+  (4 approved Discord users).</li>
+<li>Disabled <code>bambou-discord</code> and <code>bambou-telegram</code>, then installed and started
+  <code>bambou.service</code>.</li>
+</ul>
+</li>
+</ol>
+</section><section id="day-to-day"><h2>Day-to-day</h2>
+<pre><code class="language-bash">systemctl status bambou-hub bambou            # health
+journalctl -u bambou-hub -f                    # hub log
+journalctl -u bambou -f                        # bot log
+curl -s https://bamboubot.duckdns.org/api/health
+</code></pre>
+<p>Link your Discord or Telegram account to your hub user: <strong>Users → Link code</strong> in the
+dashboard, then send <code>/hub link &lt;code&gt;</code> to the bot. Set where alerts go under
+<strong>Alerts → Default channels</strong>:
+* Discord: <code>guildId:channelId</code>
+* Telegram: chat id, or <code>chatId:threadId</code> for a forum topic</p>
+</section><section id="updating"><h2>Updating</h2>
+<pre><code class="language-bash">cd /root/Projects/BambouBOT/HubDashboard-v2 &amp;&amp; git pull           # or any checkout of main
+rsync -a --delete --exclude .venv --exclude node_modules --exclude .git --exclude data \
+      --exclude 'BambouBot/.env' --exclude 'BambouBot/data' ./ /opt/bambou-hub/
+cd /opt/bambou-hub &amp;&amp; .venv/bin/pip install -q -r hub/requirements.txt
+(cd frontend &amp;&amp; npm ci &amp;&amp; npm run build)
+chown -R root:root /opt/bambou-hub
+systemctl restart bambou-hub          # runs pending database migrations on start
+
+# bot
+rsync -a --delete --exclude .env --exclude data --exclude node_modules BambouBot/ /opt/bambou-bot/
+(cd /opt/bambou-bot &amp;&amp; npm ci --omit=dev)
+systemctl restart bambou
+</code></pre>
+</section><section id="backups-of-the-hub-itself"><h2>Backups of the hub itself</h2>
+<pre><code class="language-bash">sudo -u postgres pg_dump -Fc bambouhub &gt; /var/backups/bambouhub-$(date +%F).dump
+cp /var/lib/bambou-hub/hub-secret.key /var/backups/hub-secret.key    # once; it never changes
+</code></pre>
+<p>Restore with <code>pg_restore -d bambouhub --clean &lt;dump&gt;</code>, using the same <code>hub-secret.key</code>.</p>
+</section><section id="rolling-back-to-v1"><h2>Rolling back to v1</h2>
+<p>v1's code and data are untouched in <code>/root/Projects/BambouBOT/HubDashboard</code>.</p>
+<pre><code class="language-bash">systemctl disable --now bambou-hub bambou
+cp /etc/caddy/Caddyfile.bak-before-hub-v2 /etc/caddy/Caddyfile &amp;&amp; systemctl reload caddy
+systemctl enable --now hub-dashboard hub-dashboard-tunnel bambou-discord bambou-telegram
+</code></pre>
+<p>v1 resumes from its state at the switch. Anything recorded in v2 after the switch
+stays in Postgres but is not visible in v1.</p>
+</section><section id="moving-a-vps-to-the-v2-agent"><h2>Moving a VPS to the v2 agent</h2>
+<p>The two live VPSes still run the <strong>v1</strong> agent, which works through the compatibility
+API. Moving them to <code>bambou-agent</code> adds:
+* per-worker logs from inside the script
+* costs
+* pause/resume
+* file sync for <code>.env</code>
+* instant commands</p>
+<p>Follow <a href="/hub-docs/docs/v2/INTEGRATION.html">INTEGRATION.md</a>. The site's token stays the same. Stop the v1
+agent on that VPS once the new one is reporting.</p></section></main>
+<footer>Published from HubDashboard-v2/docs/v2/DEPLOYMENT.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

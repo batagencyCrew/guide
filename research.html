@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research – Bambou Project Onboarding</title>
+<meta name="theme-color" content="#173c30">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="guide.css">
+<script src="guide.js" defer></script>
+</head>
+<body>
+<header>
+<h1>Research</h1>
+<p>Maintained by BIPRO</p>
+</header>
+<div class="pages">
+<a href="index.html">← Overview</a>
+<a href="research.html" class="active">Research</a>
+<a href="hub.html">Dashboard / HUB</a>
+</div>
+<main>
+<section>
+<h2>1. What to research per site</h2>
+<ul>
+<li>Signup vs guest-chat flow – do we need accounts, or can we run guests?</li>
+<li>Chat transport – websocket / polling / plain HTTP?</li>
+<li>Skip / next behavior, rate limits, captchas, bans.</li>
+<li>Whether promotional links can be shared in chat – interested users need a way to reach the relevant social profile or service. If links are unavailable and there is no assigned alternative channel, the site is not suitable for this marketing workflow.</li>
+<li>Online count – SKIP SITES WITH &lt;~15 online users.</li>
+<li>Average Visit Time via SimilarWeb (below) – used to calibrate bot count.</li>
+</ul>
+</section>
+<section>
+<h2>2. SimilarWeb – Average Visit Time</h2>
+<ol>
+<li>Go to <a href="https://similarweb.com">similarweb.com</a>. Register / Login if you don't have an account yet.</li>
+<li>In the dashboard, search for the site you want statistics for (e.g. <code>camsurf.com</code>).</li>
+<li>Open its report, find the <strong>Engagement Overview</strong> card.</li>
+<li>Look for <strong>Average Visit Time</strong> (avg time per session). That's the number we need.</li>
+</ol>
+<p>Example: if it shows 15 min, you test for 15 min acting as a normal user.</p>
+</section>
+<section>
+<h2>3. Bambou's calibration rules</h2>
+<div class="rule"><strong>Start around 100 accounts simultaneously.</strong> Small sites need fewer, big sites need more – around 100 at once is a good baseline.</div>
+<div class="rule"><strong>Test as a normal user.</strong> Launch your bots, then open one normal account yourself and chat for the Average Visit Time you found on SimilarWeb.</div>
+<div class="rule"><strong>Goal is 1 convo per session.</strong> In one full session (e.g. 15 min), you should match the AI chatbot about once.</div>
+<div class="rule"><strong>Too few matches → increase accounts.</strong> If you test for the full session time and never talk to the AI bot, add more accounts.</div>
+<div class="rule"><strong>Too many matches → reduce accounts.</strong> Example Bambou gave: if in 1 min 50 you talked to the AI chatbot 5 times, that's too much – reduce the amount.</div>
+<div class="rule"><strong>Handle bot-to-bot matches.</strong> Bots will match each other. Scrape the assigned ID (<code>assigned id=...</code>) where available and skip own IDs. Bambou-side skip may also be added later – for now, just avoid wasting chats on our own bots.</div>
+<pre>100 bots + 1 normal user → chat for Avg Visit Time → ~1 AI match per session → tune up/down</pre>
+</section>
+<section>
+<h2>4. After research</h2>
+<ul>
+<li>If links blocked + no Snapchat workaround → drop the site, pick another.</li>
+<li>If online count too low → drop it.</li>
+<li>Otherwise → build prototype fast (see Overview §3).</li>
+<li>Log findings in the shared sheet so the next dev doesn't repeat the work.</li>
+</ul>
+<p><a href="index.html">← Back to Overview</a></p>
+</section>
+</main>
+<footer>TODO: screenshots of SimilarWeb dashboard · per-site findings table</footer>
+</body>
+</html>

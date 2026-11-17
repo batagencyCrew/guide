@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Connecting a script to the hub – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Connecting a script to the hub</h1><p>HUB v2 documentation · <code>docs/v2/INTEGRATION.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/docs/v2/INTEGRATION.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>Each site has <strong>one script on one VPS</strong>. On that VPS you run <code>bambou-agent</code> next to the
+script, and inside the script you use the <code>bambouhub</code> SDK.</p>
+<pre><code>hub  ◄── WSS/HTTPS ──  bambou-agent  ◄── unix socket ──  your script + bambouhub SDK
+</code></pre>
+<ul>
+<li>The <strong>agent</strong> owns the hub token, starts/stops/restarts the script, restarts it after
+  crashes, syncs <code>config.json</code> / <code>.env</code> / <code>proxies.txt</code>, reports VPS CPU/RAM/disk, backs
+  up the code, and keeps data on disk while the hub is unreachable.</li>
+<li>The <strong>SDK</strong> gives the script workers, logs, metrics, costs, balances, proxy health,
+  issues and commands. It never sees the hub token.</li>
+</ul>
+<p>New script? Start from a template: <a href="/hub-docs/templates/v2/README.html"><code>templates/v2/python</code></a> or
+<a href="/hub-docs/templates/v2/README.html"><code>templates/v2/node</code></a>. They are complete scripts with <code>TODO</code>
+blocks for your own code (<a href="/hub-docs/templates/v2/README.html">templates/v2/README.md</a>).</p>
+</section><section id="1-create-the-site-and-get-a-token"><h2>1. Create the site and get a token</h2>
+<p>Dashboard → <strong>Overview → Add site</strong>. Copy the agent token (shown once). You can rotate
+it later from the site's <strong>Settings</strong> tab.</p>
+</section><section id="2-install-the-agent-on-the-vps"><h2>2. Install the agent on the VPS</h2>
+<p>The agent needs Python 3.10+ on the VPS. As root:</p>
+<pre><code class="language-bash">git clone https://github.com/batagencyCrew/BambouBOT-HubDashboard.git /tmp/hub-src   # private repo: use a token/deploy key, or rsync the folders over
+mkdir -p /opt/bambou-agent
+cp -r /tmp/hub-src/agent2 /tmp/hub-src/sdk /tmp/hub-src/deploy /opt/bambou-agent/ &amp;&amp; rm -rf /tmp/hub-src
+python3 -m venv /opt/bambou-agent/.venv
+/opt/bambou-agent/.venv/bin/pip install -r /opt/bambou-agent/agent2/requirements.txt
+useradd --system --create-home automation 2&gt;/dev/null || true    # user the script runs as
+</code></pre>
+<p>Create <code>/etc/bambou-agent/&lt;site&gt;.conf</code> (owner root, mode 600). One file per site; the
+name after <code>@</code> in the service is this file's name:</p>
+<pre><code class="language-dotenv">HUB_URL=https://bamboubot.duckdns.org
+HUB_AGENT_TOKEN=hst_...
+HUB_SCRIPT_DIR=/opt/scripts/mysite
+HUB_SCRIPT_COMMAND=/opt/scripts/mysite/.venv/bin/python main.py
+HUB_FILES=config.json,.env,proxies.txt
+HUB_STATE_DIR=/var/lib/bambou-agent-mysite
+</code></pre>
+<p>Install and start it as a service:</p>
+<pre><code class="language-bash">cp /opt/bambou-agent/deploy/bambou-agent@.service /etc/systemd/system/
+chown -R automation:automation /opt/scripts/mysite
+systemctl daemon-reload &amp;&amp; systemctl enable --now bambou-agent@mysite
+journalctl -u bambou-agent@mysite -f
+</code></pre>
+<p>The unit runs as user <code>automation</code>, and <code>/opt/scripts</code> must be writable for config-file
+sync. Edit the unit if your script lives elsewhere.</p>
+<p>Settings can also be given as command-line options (for a quick manual run):</p>
+<pre><code class="language-bash">HUB_URL=https://bamboubot.duckdns.org HUB_AGENT_TOKEN=hst_... \
+PYTHONPATH=/opt/bambou-agent/agent2 /opt/bambou-agent/.venv/bin/python -m bambou_agent \
+  --script-dir /opt/scripts/mysite --command "python3 main.py" \
+  --file config.json --file .env --file proxies.txt
+</code></pre>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Option (env)</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--script-dir</code> (<code>HUB_SCRIPT_DIR</code>)</td>
+<td>Script root. Managed files and backups are relative to it.</td>
+</tr>
+<tr>
+<td><code>--command</code> (<code>HUB_SCRIPT_COMMAND</code>)</td>
+<td>How to start the script. Omit it if something else starts the script; the agent then only relays telemetry, files and backups.</td>
+</tr>
+<tr>
+<td><code>--file PATH[:FORMAT]</code> (<code>HUB_FILES</code>, comma-separated)</td>
+<td>File to manage. Format is guessed: <code>.env</code> → env, <code>*.json</code> → json, <code>*prox*.txt</code> → proxies, <code>*prox*.json</code> → proxy-json; anything else → text. In addition, <code>proxies.txt</code> (<code>proxies</code>), <code>proxies.json</code> (<code>proxy-json</code>), and <code>.bambou-config.schema.json</code> (<code>json</code>) in <code>--script-dir</code> are auto-discovered and enrolled if present.</td>
+</tr>
+<tr>
+<td><code>--no-auto-files</code> (<code>HUB_AUTO_FILES=false</code>)</td>
+<td>Disable auto-enrollment of <code>proxies.txt</code>, <code>proxies.json</code>, and <code>.bambou-config.schema.json</code>.</td>
+</tr>
+<tr>
+<td><code>--state-dir</code> (<code>HUB_STATE_DIR</code>)</td>
+<td>Agent state: offline spool, file-sync state, script output log. Default <code>&lt;script-dir&gt;/.bambou-agent</code>.</td>
+</tr>
+<tr>
+<td><code>--no-crash-restart</code></td>
+<td>Do not restart the script automatically after it crashes.</td>
+</tr>
+<tr>
+<td><code>--no-backup</code></td>
+<td>Disable backups on this VPS.</td>
+</tr>
+<tr>
+<td><code>--backup-exclude GLOB</code></td>
+<td>Extra excludes (hub defaults: <code>.git node_modules __pycache__ .venv venv</code>).</td>
+</tr>
+<tr>
+<td><code>--env KEY=VALUE</code></td>
+<td>Extra environment variables for the script.</td>
+</tr>
+<tr>
+<td><code>--stop-timeout</code> (<code>HUB_STOP_TIMEOUT</code>)</td>
+<td>Seconds between SIGTERM and SIGKILL on stop (default 20).</td>
+</tr>
+</tbody>
+</table></div>
+<p>The script is started with <code>HUB_AGENT_SOCKET</code> set, and the SDK uses it automatically.
+The script's stdout/stderr go to <code>&lt;state-dir&gt;/script-output.log</code>. After a crash, the
+last lines are sent to the hub as an error log.</p>
+</section><section id="3-add-the-sdk-to-the-script"><h2>3. Add the SDK to the script</h2>
+<h3 id="python">Python</h3>
+<pre><code class="language-python">import sys; sys.path.insert(0, "/opt/bambou-agent/sdk/python")   # or pip install -e sdk/python
+from bambouhub import hub
+
+hub.install_logging()                 # every logging.* call now reaches the hub
+</code></pre>
+<p>Workers — any model works; declare each unit of parallel work:</p>
+<pre><code class="language-python">def run(account):
+    with hub.worker(f"worker-{account.id}") as w:      # running on enter, stopped/error on exit
+        while not hub.stopping.is_set():
+            hub.wait_if_paused()                        # honours Pause/Resume
+            w.idle("waiting for partner")               # shows idle + reason; alerts after 15 min
+            ...
+            w.running()
+            w.task_done()
+</code></pre>
+<ul>
+<li><strong>Threads / ThreadPoolExecutor</strong>: use <code>with hub.worker(...)</code> inside the thread function.</li>
+<li><strong>asyncio</strong>: same — the worker is bound to the task's context.</li>
+<li><strong>Separate processes</strong>: each process imports the SDK; the agent merges them.</li>
+<li><strong>Browsers (Selenium/AdsPower/Playwright)</strong>: one worker per browser/profile.</li>
+</ul>
+<p>Logs, attributed to the worker automatically when inside <code>with hub.worker(...)</code>:</p>
+<pre><code class="language-python">log.info("connected")            # stdlib logging (after install_logging)
+w.log.warning("slow proxy")      # explicit
+hub.error("login failed", exc_info=True, account="a1")   # extra fields become context
+</code></pre>
+<p><strong>Costs</strong> — call <code>add_cost</code> wherever money is spent. The SDK sums entries locally and
+sends them every 2 s; the hub keeps them forever and totals per day/provider/site.</p>
+<pre><code class="language-python">hub.set_price("capsolver", 0.0008, unit="solve")   # once, at startup
+hub.add_cost(provider="capsolver", category="captcha")         # uses the price
+hub.add_cost(0.0021, provider="openai", category="ai", quantity=1, unit="request")
+hub.addCost(cost_of_req, provider="smsactivate", category="sms")  # alias
+
+with hub.cost("2captcha", "captcha") as c:   # records on exit, c.cancel() to skip
+    c.amount = solve_and_get_price()
+
+hub.cost_summary()   # running totals since start: {"USD": {"capsolver": 1.23}}
+</code></pre>
+<p><strong>Balances</strong> (alerts when at/below <code>low</code>):</p>
+<pre><code class="language-python">hub.balance("capsolver", capsolver.get_balance(), low=5)
+</code></pre>
+<p><strong>Proxy health</strong> — report results; the hub never receives credentials (the URL is hashed):</p>
+<pre><code class="language-python">hub.proxy("proxy-3", "ok", url=proxy_url)
+hub.proxy("proxy-3", "blocked", url=proxy_url, detail="HTTP 403 from site")
+# states: ok | slow | blocked | auth | timeout
+</code></pre>
+<p><strong>Metrics</strong> — anything you want to chart:</p>
+<pre><code class="language-python">hub.count("links_sent")                 # summed
+hub.gauge("queue_size", len(queue))     # averaged
+hub.timing("chat_seconds", 41.7)
+</code></pre>
+<p><strong>Issues</strong> — things a human must look at; forwarded to Discord/Telegram:</p>
+<pre><code class="language-python">hub.issue("Login loop", "worker-2 re-logged 5 times in 10 min", severity="critical")
+</code></pre>
+<p><strong>Commands</strong> — built-ins set flags you read; custom ones appear as buttons/bot commands:</p>
+<pre><code class="language-python">hub.paused.is_set()          # Pause/Resume
+hub.desired_workers          # Set workers (None until changed)
+hub.stopping.is_set()        # Stop requested (the agent also sends SIGTERM)
+
+@hub.on_command("refresh_cookies", description="Log in again on every worker")
+def refresh_cookies():
+    ...
+    return "refreshed 4 sessions"      # shown in the dashboard
+
+@hub.on_config_change
+def reload(path):                       # after the hub rewrote a managed file
+    global config; config = json.load(open("config.json"))
+</code></pre>
+<p><strong>Dynamic config &amp; secret schema</strong> — declare your script's own typed settings so the
+dashboard renders a custom form (with secret Preserve / Replace / Clear controls and live
+BambouBotAI preset pickers) backed directly by <code>config.json</code> and <code>.env</code>:</p>
+<pre><code class="language-python">hub.declare_config_schema([
+    {"key": "number_of_workers", "label": "Workers", "type": "integer", "min": 0, "max": 50,
+     "file": "config.json", "required": True, "restart_required": True},
+    {"key": "ai.preset_id", "label": "AI Preset", "type": "preset", "file": "config.json",
+     "description": "Loaded from BambouBotAI via POST /api/sites/{ref}/presets"},
+    {"key": "ai.api_key", "label": "BambouBotAI Key", "type": "secret", "file": "config.json",
+     "preset_key": True},
+    {"key": "CAPTCHA_API_KEY", "label": "Captcha Key", "type": "secret", "file": ".env"},
+    {"key": "mode", "label": "Mode", "type": "select", "options": ["fast", "safe"]},
+])
+</code></pre>
+<p>Field types: <code>string</code>, <code>number</code>, <code>integer</code>, <code>boolean</code>, <code>select</code>, <code>preset</code>, <code>secret</code>,
+<code>multiline</code>. You can also place a <code>.bambou-config.schema.json</code> file (<code>{"file": "config.json", "fields": [...]}</code>)
+in the script directory if the script does not import the SDK.</p>
+<h3 id="nodejs">Node.js</h3>
+<pre><code class="language-js">const { hub } = require('/opt/bambou-agent/sdk/node');
+hub.captureConsole();                          // console.warn/error → hub
+const w = hub.worker('worker-1');
+w.running(); w.idle('no partner'); w.log.info('connected'); w.taskDone();
+hub.setPrice('capsolver', 0.0008, { unit: 'solve' });
+hub.addCost(null, { provider: 'capsolver', category: 'captcha' });
+hub.addCost(0.0021, { provider: 'openai', category: 'ai' });
+hub.balance('capsolver', 3.1, { low: 5 });
+hub.proxy('proxy-1', 'blocked', { url: proxyUrl, detail: '403' });
+hub.issue('Login loop', 'worker-2 relogged 5 times', { severity: 'warning' });
+hub.onCommand('refresh_cookies', async () =&gt; 'done', { description: 'Re-login' });
+hub.declareConfigSchema([
+  { key: 'workers', label: 'Workers', type: 'integer', min: 1, max: 50, file: 'config.json' },
+  { key: 'AI_API_KEY', label: 'AI Key', type: 'secret', file: '.env', preset_key: true },
+]);
+hub.onConfigChange((path) =&gt; reload(path));
+hub.on('set_workers', (count) =&gt; scale(count));
+await hub.waitIfPaused();
+</code></pre>
+<p><code>worker_threads</code>: require the SDK inside the thread too, and call
+<code>hub.attachThread(worker)</code> in the main thread so its data and commands are relayed.</p>
+<h3 id="without-the-agent-not-recommended">Without the agent (not recommended)</h3>
+<p>Set <code>HUB_URL</code> and <code>HUB_AGENT_TOKEN</code> for the script itself: the SDK then posts directly
+to the hub and polls commands. Start/restart, crash restarts, file sync and backups
+need the agent.</p>
+</section><section id="4-config-files-proxies-log-visibility"><h2>4. Config files, proxies &amp; log visibility</h2>
+<p>Files passed with <code>--file</code> (plus <code>proxies.txt</code>, <code>proxies.json</code>, and
+<code>.bambou-config.schema.json</code> if present in <code>--script-dir</code>) are uploaded on first run, then
+shown in the site's <strong>Files</strong> and <strong>Proxies</strong> tabs. Editing there—through raw/structured file
+edits, <code>PATCH /api/sites/{ref}/config-values</code>, or <code>/api/sites/{ref}/proxies</code> CRUD and batch
+import—writes the file on the VPS within seconds via <code>files_changed</code> and notifies the script
+via <code>on_config_change</code>. Editing a file by hand on the VPS is detected and uploaded, keeping
+comments intact. See <code>ARCHITECTURE.md → Config files</code> for conflict rules.</p>
+<p>Secrets in <code>.env</code>/JSON (keys containing <em>key, token, secret, password, cookie, session,
+auth…</em> plus any field marked <code>secret: true</code> in <code>config_schema</code>) and proxy passwords are
+masked as <code>********</code> unless the viewer holds <code>secrets:reveal</code> and explicitly requests
+<code>?reveal=true</code> (recorded in <code>audit_log</code>).</p>
+<p>Worker and script logs are stored verbatim without regex credential-rejection filters so
+internal engineers can inspect complete tracebacks and upstream failures; read access to
+<code>/api/logs</code> is gated by <code>sites:view</code> and each user's <code>site_scope</code>.</p>
+</section><section id="existing-scripts-minimal-change"><h2>Existing scripts: minimal change</h2>
+<ol>
+<li>Move hard-coded values (API keys, proxy, counts) into <code>config.json</code> / <code>.env</code> /
+   <code>proxies.txt</code> and read them at startup.</li>
+<li>Add <code>from bambouhub import hub; hub.install_logging()</code>.</li>
+<li>Wrap each worker's loop in <code>with hub.worker(name) as w:</code>.</li>
+<li>Add <code>hub.add_cost(...)</code> next to each paid API call and <code>hub.proxy(...)</code> where proxy
+   results are known.</li>
+<li>Run the script under <code>bambou-agent</code>.</li>
+</ol>
+<p>Steps 2–3 alone already give per-worker logs and health in the dashboard.</p></section></main>
+<footer>Published from HubDashboard-v2/docs/v2/INTEGRATION.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

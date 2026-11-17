@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Dashboard / HUB – Bambou Project Onboarding</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css">
+<script src="/guide.js" defer></script>
+</head>
+<body data-page="hub">
+<header><h1>Dashboard / HUB (v2)</h1><p>Maintained by BIPRO</p></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main>
+<section id="required">
+<h2>Required for every automation</h2>
+<p>Every site automation must integrate with the <strong>Bambou Automation Hub v2</strong>, in addition to the Bambou AI API. Your site automation is not finished until it is connected and verified in the HUB.</p>
+<p>In v2, each site has one script on one VPS supervised by <code>bambou-agent</code> (<code>agent2/</code>). Your script imports the <code>bambouhub</code> SDK (Python or Node.js) and talks to the agent over a local Unix socket (<code>HUB_AGENT_SOCKET</code>). The agent owns the HUB token, syncs config files, buffers offline telemetry, reports host metrics, and uploads backups; the HUB does not implement your site's automation, AI generation, or captcha solving.</p>
+<pre><code>your script + bambouhub SDK ── unix socket ── bambou-agent ══ WSS/HTTPS ══ https://bamboubot.duckdns.org</code></pre>
+<div class="rule"><strong>Public dashboard / HUB origin:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br><strong>Agent transport:</strong> <code>wss://bamboubot.duckdns.org/ws/site</code> + <code>https://bamboubot.duckdns.org/api/agent/v2/*</code></div>
+<p>Set <code>HUB_URL=https://bamboubot.duckdns.org</code> in the agent config — origin only, never localhost in production. The script itself never holds <code>HUB_AGENT_TOKEN</code>.</p>
+</section>
+<section id="setup">
+<h2>Setup and starter downloads</h2>
+<ol>
+<li>Ask BIPRO/Bambou to create or assign your site in the dashboard (<strong>Overview → Add site</strong>) and provide its one-time <strong>site agent token</strong> (<code>hst_...</code>). Keep it only in the agent's private root-owned config file.</li>
+<li><a href="/downloads/hub-starters.zip" download>Download the v2 documentation + starter package</a>. It contains the v2 docs, <code>bambou-agent</code> (<code>agent2/</code>), Python and Node.js <code>bambouhub</code> SDKs (<code>sdk/</code>), runnable <a href="/hub-docs/templates/v2/README.html">Python and Node.js starters</a> (<code>templates/v2/</code>), and the <a href="/hub-docs/deploy/bambou-agent@.service" download>systemd unit</a> (<code>deploy/bambou-agent@.service</code>).</li>
+<li>Install <code>bambou-agent</code> (Python 3.10+) into <code>/opt/bambou-agent</code> with a venv from <code>agent2/requirements.txt</code>, and copy your chosen starter (<code>templates/v2/python</code> or <code>templates/v2/node</code>) plus the matching SDK into <code>/opt/scripts/&lt;site&gt;/</code>. See <a href="/hub-docs/docs/v2/INTEGRATION.html">Connecting a script to the hub</a> for exact commands.</li>
+<li>Replace every <code>TODO</code> block in the starter (settings reload, prices, <code>open_session</code>, <code>do_task</code>, <code>close_session</code>, custom commands, optional balances) — or add the <code>bambouhub</code> SDK directly to an existing script.</li>
+<li>Create <code>/etc/bambou-agent/&lt;site&gt;.conf</code> (owner <code>root</code>, mode <code>0600</code>) as shown below, install <code>bambou-agent@.service</code>, and enable <code>systemctl enable --now bambou-agent@&lt;site&gt;</code>.</li>
+<li>In the dashboard, configure secrets/presets/proxies in the site's <strong>Configuration</strong>, <strong>Files</strong>, and <strong>Proxies</strong> tabs, set a backup destination, press <strong>Start</strong>, and run the verification checks below before handoff.</li>
+</ol>
+<pre><code>HUB_URL=https://bamboubot.duckdns.org
+HUB_AGENT_TOKEN=hst_replace_with_your_site_agent_token
+HUB_SCRIPT_DIR=/opt/scripts/mysite
+HUB_SCRIPT_COMMAND=/opt/scripts/mysite/.venv/bin/python main.py
+HUB_FILES=config.json,.env,proxies.txt
+HUB_STATE_DIR=/var/lib/bambou-agent-mysite</code></pre>
+<p>These are example paths and a placeholder token, not credentials. Note that <code>proxies.txt</code>, <code>proxies.json</code>, and <code>.bambou-config.schema.json</code> in <code>HUB_SCRIPT_DIR</code> are also auto-discovered unless <code>--no-auto-files</code> is set. Run one <code>bambou-agent</code> per site token.</p>
+</section>
+<section id="integration">
+<h2>What you must wire up</h2>
+<ul>
+<li><strong>Workers &amp; health:</strong> wrap each parallel unit (thread, asyncio task, process, or browser) with <code>with hub.worker(name) as w:</code> (Python) or <code>hub.worker(name)</code> (Node.js). Update <code>w.running()</code>, <code>w.idle("reason")</code>, <code>w.error("reason")</code>, and <code>w.task_done()</code> / <code>w.taskDone()</code>.</li>
+<li><strong>Logs:</strong> call <code>hub.install_logging()</code> (Python) or <code>hub.captureConsole()</code> (Node.js) and use <code>w.log.*</code> so every level and traceback reaches the HUB, attributed to the active worker.</li>
+<li><strong>Metrics, costs &amp; balances:</strong> report real counters/gauges/timings (<code>hub.count</code>, <code>hub.gauge</code>, <code>hub.timing</code>), record spend via <code>hub.set_price</code> + <code>hub.add_cost</code> / <code>with hub.cost(...)</code> wherever money is spent, and optionally report provider balances via <code>hub.balance(..., low=...)</code>.</li>
+<li><strong>Proxy health:</strong> report proxy results with <code>hub.proxy(label, state, url=proxy_url)</code> using states <code>ok | slow | blocked | auth | timeout</code>. Proxy credentials are never sent; only the proxy key hash is emitted.</li>
+<li><strong>Config files, dynamic schema &amp; proxies:</strong> read settings from <code>config.json</code>, <code>.env</code>, and <code>proxies.txt</code>, reload on <code>@hub.on_config_change</code> / <code>hub.onConfigChange</code>, and optionally call <code>hub.declare_config_schema(...)</code> (or ship <code>.bambou-config.schema.json</code>) for typed forms and live BambouBotAI preset pickers.</li>
+<li><strong>Lifecycle controls, commands &amp; issues:</strong> honour <code>hub.stopping</code>, <code>hub.wait_if_paused()</code>, and <code>hub.desired_workers</code>; register custom dashboard/bot actions with <code>@hub.on_command</code> / <code>hub.onCommand</code>; raise human-actionable problems with <code>hub.issue(...)</code> (forwarded to Discord/Telegram via BambouBot).</li>
+<li><strong>Backups:</strong> keep <code>HUB_SCRIPT_DIR</code> clean and omit <code>--no-backup</code> so <code>bambou-agent</code> packs the script directory (excluding <code>.git</code>, <code>node_modules</code>, <code>__pycache__</code>, <code>.venv</code>, <code>venv</code>, and state dir) and streams it to the HUB for cloud transfer via <code>rclone</code>.</li>
+</ul>
+<p>Read <a href="/hub-docs/docs/v2/INTEGRATION.html">Connecting a script to the hub</a>, <a href="/hub-docs/templates/v2/README.html">Script starters (hub v2)</a>, and <a href="/hub-docs/docs/v2/ARCHITECTURE.html">Architecture</a> for full usage and examples.</p>
+</section>
+<section id="api-reference">
+<h2>Agent v2 &amp; SDK reference</h2>
+<p>Scripts use the <code>bambouhub</code> SDK over the local Unix socket (<code>HUB_AGENT_SOCKET</code>) and do not call HUB HTTP endpoints directly. <code>bambou-agent</code> communicates with <code>https://bamboubot.duckdns.org</code> using <code>Authorization: Bearer &lt;site-agent-token&gt;</code>:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Method / path</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>GET /ws/site</code></td><td>WebSocket for instant command push, file-change notifications, and batch telemetry.</td></tr>
+<tr><td><code>GET /api/agent/v2/whoami</code></td><td>Verify site token, resolve site metadata, and read <code>desired_state</code>.</td></tr>
+<tr><td><code>POST /api/agent/v2/batch</code></td><td>Send presence, workers, host metrics, logs, metrics, costs, balances, proxy observations, issues, and command acks.</td></tr>
+<tr><td><code>GET /api/agent/v2/commands</code></td><td>HTTP polling fallback for pending lifecycle and custom commands.</td></tr>
+<tr><td><code>POST /api/agent/v2/commands/{id}/ack</code></td><td>Acknowledge command execution status (<code>running</code>, <code>completed</code>, <code>failed</code>).</td></tr>
+<tr><td><code>GET /api/agent/v2/files</code></td><td>Fetch managed config files and revisions from the HUB.</td></tr>
+<tr><td><code>POST /api/agent/v2/files/ack</code> · <code>/files/push</code></td><td>Acknowledge applied HUB edits or push hand-edited local file changes.</td></tr>
+<tr><td><code>GET /api/agent/v2/backups/config</code></td><td>Fetch scheduled backup settings and excludes.</td></tr>
+<tr><td><code>POST /api/agent/v2/backups/upload</code></td><td>Stream packed <code>.tar.gz</code> codebase archive to the HUB for rclone transfer.</td></tr>
+</tbody></table></div>
+<p>Note: legacy v1 routes under <code>/api/agent/*</code> remain available only as a compatibility layer for unmigrated scripts; all new scripts must use v2 (<code>bambou-agent</code> + <code>bambouhub</code> SDK).</p>
+<p>Public connectivity check (no credentials):</p>
+<pre><code>curl --fail https://bamboubot.duckdns.org/api/health
+# Expected: {"status":"ok"}</code></pre>
+<p>Full API payloads, dashboard/bot routes, and permissions: <a href="/hub-docs/docs/v2/API.html">Hub API reference (v2)</a>.</p>
+</section>
+<section id="acceptance">
+<h2>Verify before handoff</h2>
+<ul>
+<li><code>bambou-agent@&lt;site&gt;</code> runs as a systemd service, starts on boot, and reconnects automatically after network drops or HUB restarts (with offline disk spooling intact).</li>
+<li>Dashboard shows the site online with real worker statuses, task counts, host CPU/RAM/disk, and live per-worker logs.</li>
+<li><strong>Start</strong>, <strong>Stop</strong>, <strong>Restart</strong>, <strong>Pause / Resume</strong>, <strong>Set workers</strong>, and any custom commands execute cleanly and report completion.</li>
+<li>Managed files (<code>config.json</code>, <code>.env</code>, <code>proxies.txt</code>) sync both ways; dashboard edits reach disk within seconds, trigger <code>on_config_change</code>, and secret fields stay masked without <code>secrets:reveal</code>.</li>
+<li>Real metrics, costs, and proxy health observations appear in the dashboard (and optional balances / <code>hub.issue</code> alerts route to Discord/Telegram if configured).</li>
+<li>An on-demand backup succeeds from the agent through the HUB to the assigned cloud destination.</li>
+</ul>
+</section>
+<section id="security">
+<h2>Credentials, retries, and limits</h2>
+<p>Keep <code>HUB_AGENT_TOKEN</code> (<code>hst_...</code>) only in <code>/etc/bambou-agent/&lt;site&gt;.conf</code> (mode <code>0600</code>). Never commit tokens or expose <code>HUB_AGENT_TOKEN</code> to the automation script environment; the agent connects to the HUB and exposes only a local Unix socket to the script.</p>
+<p>Secrets in <code>.env</code> / JSON (and fields marked <code>secret: true</code> in <code>config_schema</code>) plus proxy passwords are masked as <code>********</code> in the dashboard unless the viewer holds <code>secrets:reveal</code> and explicitly reveals them (which is recorded in <code>audit_log</code>). Log ingestion preserves tracebacks for internal troubleshooting and gates log reads by <code>sites:view</code> and <code>site_scope</code>.</p>
+<p><code>bambou-agent</code> spools batches to <code>HUB_STATE_DIR</code> when the HUB is unreachable and deduplicates command deliveries. Keep secrets out of source code and treat whole-codebase backup archives as sensitive since <code>HUB_SCRIPT_DIR</code> may contain <code>.env</code>; cloud storage credentials belong only on the HUB.</p>
+</section>
+<section id="documentation">
+<h2>Complete v2 documentation library</h2>
+<p>These are published copies of the Hub v2 Markdown documents in <code>HubDashboard-v2/</code>, plus <code>agent2/</code>, <code>sdk/</code>, and <code>templates/v2/</code> in the starter package. Production HUB examples use <code>https://bamboubot.duckdns.org</code>.</p>
+<p><a class="download-link" href="/downloads/hub-starters.zip" download>Download v2 docs + agent + SDKs + starters (.zip) ↓</a></p>
+<!-- HUB_DOCS_CATALOG -->
+<h3>Getting started</h3><ul class="doc-list">
+<li><a href="/hub-docs/README.html">Bambou Automation Hub (v2)</a><span>README.md</span></li>
+<li><a href="/hub-docs/docs/v2/INTEGRATION.html">Connecting a script to the hub</a><span>docs/v2/INTEGRATION.md</span></li>
+<li><a href="/hub-docs/templates/v2/README.html">Script starters (hub v2)</a><span>templates/v2/README.md</span></li>
+</ul>
+<h3>API and architecture</h3><ul class="doc-list">
+<li><a href="/hub-docs/docs/v2/API.html">Hub API reference (v2)</a><span>docs/v2/API.md</span></li>
+<li><a href="/hub-docs/docs/v2/ARCHITECTURE.html">Bambou Hub v2 — Architecture</a><span>docs/v2/ARCHITECTURE.md</span></li>
+</ul>
+<h3>Operations and reference</h3><ul class="doc-list">
+<li><a href="/hub-docs/docs/v2/DEPLOYMENT.html">Deployment and operations (hub host)</a><span>docs/v2/DEPLOYMENT.md</span></li>
+<li><a href="/hub-docs/docs/v2/ROADMAP.html">v2 status and roadmap</a><span>docs/v2/ROADMAP.md</span></li>
+<li><a href="/hub-docs/frontend/README.html">Bambou Hub v2 — dashboard</a><span>frontend/README.md</span></li>
+<li><a href="/hub-docs/BambouBot/README.html">BambouBot</a><span>BambouBot/README.md</span></li>
+</ul>
+<p class="source-note">Source snapshot: <code>5b4d09f48521 (working tree)</code> · 9 documents · Download includes 35 allowlisted source files. No production credentials or runtime data.</p>
+<!-- /HUB_DOCS_CATALOG -->
+</section>
+</main>
+<footer>Dashboard / HUB v2 integration · Source: HubDashboard-v2 documentation</footer>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Bambou Automation Hub (v2) – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Bambou Automation Hub (v2)</h1><p>HUB v2 documentation · <code>README.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/README.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>One place to watch and control automation scripts running on many VPSes:
+- per-worker logs and health
+- metrics, costs and balances
+- proxy health
+- config-file editing (<code>config.json</code>, <code>.env</code>, <code>proxies.txt</code>)
+- commands
+- alerts to Discord and Telegram
+- codebase backups to cloud storage</p>
+<p>The hub manages scripts; it does not contain automation logic.</p>
+<pre><code>VPS: script + bambouhub SDK ── unix socket ── bambou-agent ══ WSS/HTTPS ══ Hub (FastAPI + Postgres)
+                                                                            ├─ Dashboard (React)
+                                                                            └─ BambouBot (Discord + Telegram)
+</code></pre>
+</section><section id="repository-layout"><h2>Repository layout</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hub/</code></td>
+<td>v2 hub: FastAPI app, Postgres migrations, alerts, backups, v1 importer, CLI, tests</td>
+</tr>
+<tr>
+<td><code>frontend/</code></td>
+<td>v2 dashboard (React + TypeScript + Vite), served by the hub</td>
+</tr>
+<tr>
+<td><code>agent2/</code></td>
+<td><code>bambou-agent</code>, one per VPS</td>
+</tr>
+<tr>
+<td><code>sdk/python</code>, <code>sdk/node</code></td>
+<td>Libraries scripts import (<code>from bambouhub import hub</code> / <code>require('bambouhub')</code>)</td>
+</tr>
+<tr>
+<td><code>BambouBot/</code></td>
+<td>Discord + Telegram bot with the <code>/hub</code> command group</td>
+</tr>
+<tr>
+<td><code>deploy/</code></td>
+<td>systemd units, Postgres setup script</td>
+</tr>
+<tr>
+<td><code>templates/v2/</code></td>
+<td>Script starters (Python, Node) with placeholders for your code</td>
+</tr>
+<tr>
+<td><code>docs/v2/</code></td>
+<td>Architecture, API, integration guide, deployment, roadmap</td>
+</tr>
+<tr>
+<td><code>backend/</code>, <code>agent/</code>, <code>templates/{go,node,python}</code>, <code>docs/*.md</code></td>
+<td><strong>v1 (legacy)</strong>, kept for rollback. VPSes still on the v1 agent work through v2's compatibility API.</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="documentation"><h2>Documentation</h2>
+<ul>
+<li><a href="/hub-docs/docs/v2/ARCHITECTURE.html">Architecture</a>: components, data model, permissions, file sync, alerts, backups</li>
+<li><a href="/hub-docs/docs/v2/API.html">API reference</a></li>
+<li><a href="/hub-docs/docs/v2/INTEGRATION.html">Connecting a script</a>: agent install, SDK usage (workers, logs, <code>add_cost</code>, balances, proxies, issues, commands)</li>
+<li><a href="/hub-docs/docs/v2/DEPLOYMENT.html">Deployment and operations</a>: how this host runs v2, updating, backups, rollback</li>
+<li><a href="/hub-docs/docs/v2/ROADMAP.html">Roadmap and status</a></li>
+<li><a href="/hub-docs/templates/v2/README.html">Script starters</a>: runnable Python and Node templates with TODO placeholders</li>
+<li><a href="/hub-docs/BambouBot/README.html">BambouBot</a>: <code>/hub</code> commands and alert delivery ("Hub integration" section)</li>
+</ul>
+</section><section id="features"><h2>Features</h2>
+<ul>
+<li><strong>Multi-user</strong>:</li>
+<li>Roles: <code>owner</code>, <code>admin</code>, <code>operator</code>, <code>viewer</code>, plus extra per-action permissions and per-site scope.</li>
+<li>Sessions can be revoked.</li>
+<li>An audit log records every change and every secret reveal.</li>
+<li><strong>Sites and workers</strong>: site health (healthy, degraded, offline); per-worker state with a reason, CPU, memory and tasks; VPS host metrics.</li>
+<li><strong>Logs</strong>: per worker, every level, searchable, kept forever (monthly Postgres partitions).</li>
+<li><strong>Metrics, costs, balances</strong>: any metric a script reports. Scripts call <code>add_cost()</code> wherever money is spent; the SDK sums locally, and the hub totals by day, provider, category, site or worker.</li>
+<li><strong>Config files</strong>:</li>
+<li>Two-way, revisioned sync with the VPS that keeps the exact file text.</li>
+<li>Secrets are masked unless you hold <code>secrets:reveal</code>.</li>
+<li>Detects conflicting edits; keeps history with restore.</li>
+<li><strong>Commands</strong>: start, stop, restart, pause, resume, set worker count, reload config, backup, and custom script commands. Pushed instantly over WebSocket, with a polling fallback.</li>
+<li><strong>Alerts</strong>:</li>
+<li>Triggers: site offline; worker idle, error or silent; error spikes; daily cost; low balance; backup failed; proxies failing; script-reported issues.</li>
+<li>Deduplicated, can be acked or muted, delivered by the bot.</li>
+<li><strong>Backups</strong>:</li>
+<li>The agent packs the script folder.</li>
+<li>The hub copies it with rclone to <code>&lt;remote&gt;:&lt;folder&gt;/&lt;site-slug&gt;/&lt;site-slug&gt;-&lt;timestamp&gt;.tar.gz</code>.</li>
+<li>It keeps the newest N and retries failures with backoff.</li>
+</ul>
+</section><section id="development"><h2>Development</h2>
+<pre><code class="language-bash">python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r hub/requirements.txt -r agent2/requirements.txt pytest playwright
+# Postgres: a role plus dev and test databases with pgcrypto and pg_trgm (deploy/setup-postgres.sh does this)
+export HUB_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/hub_dev
+export HUB_TEST_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/hub_test
+export HUB_SECURE_COOKIES=false
+.venv/bin/python -m hub.cli migrate
+.venv/bin/python -m hub.cli create-user you --role owner
+.venv/bin/uvicorn hub.main:app --port 8000          # API + built dashboard
+(cd frontend &amp;&amp; npm ci &amp;&amp; npm run dev)              # dashboard dev server on :5173; proxies /api and /ws to :8000
+</code></pre>
+<p>Tests:</p>
+<pre><code class="language-bash">.venv/bin/python -m pytest                          # hub: unit, API, real-process agent+SDK, real-rclone backups
+node --test sdk/node/test/*.test.js                 # Node SDK
+(cd BambouBot &amp;&amp; npm test)                          # bot
+(cd frontend &amp;&amp; npm run build)                      # type-check and build
+BASE=http://127.0.0.1:8000 PASSWORD=... .venv/bin/python tests/browser_smoke_v2.py   # click through every screen
+</code></pre>
+</section><section id="environment-hub"><h2>Environment (hub)</h2>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HUB_DATABASE_URL</code></td>
+<td>yes</td>
+<td><code>postgresql://…</code></td>
+</tr>
+<tr>
+<td><code>HUB_DATA_DIR</code></td>
+<td>no (<code>./data</code>)</td>
+<td>Backup staging and the generated secret key</td>
+</tr>
+<tr>
+<td><code>HUB_SECRET_KEY</code></td>
+<td>no</td>
+<td>32+ characters; otherwise generated into <code>HUB_DATA_DIR/hub-secret.key</code>. <strong>Back it up</strong>: it decrypts stored config files.</td>
+</tr>
+<tr>
+<td><code>HUB_SECURE_COOKIES</code></td>
+<td>no (<code>true</code>)</td>
+<td>Set <code>false</code> only for plain-http local development</td>
+</tr>
+<tr>
+<td><code>HUB_SESSION_TTL</code></td>
+<td>no (<code>43200</code>)</td>
+<td>Session lifetime in seconds</td>
+</tr>
+<tr>
+<td><code>HUB_RCLONE_CONFIG</code></td>
+<td>for backups</td>
+<td>rclone config holding the cloud remotes</td>
+</tr>
+<tr>
+<td><code>HUB_BACKUP_MAX_UPLOAD_BYTES</code></td>
+<td>no (4 GiB)</td>
+<td>Largest accepted archive</td>
+</tr>
+<tr>
+<td><code>HUB_MAX_REQUEST_BYTES</code></td>
+<td>no (4 MiB)</td>
+<td>Request body limit (backup uploads exempt)</td>
+</tr>
+<tr>
+<td><code>HUB_FRONTEND_DIR</code></td>
+<td>no</td>
+<td>Built dashboard location (default <code>frontend/dist</code>)</td>
+</tr>
+<tr>
+<td><code>HUB_CORS_ORIGINS</code></td>
+<td>no</td>
+<td>Only when the dashboard is served from another origin</td>
+</tr>
+<tr>
+<td><code>HUB_BACKGROUND_TASKS</code></td>
+<td>no (<code>true</code>)</td>
+<td>Alert evaluation and backup transfers</td>
+</tr>
+</tbody>
+</table></div></section></main>
+<footer>Published from HubDashboard-v2/README.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

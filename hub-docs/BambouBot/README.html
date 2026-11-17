@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>BambouBot – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>BambouBot</h1><p>HUB v2 documentation · <code>BambouBot/README.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/BambouBot/README.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>One codebase and <strong>one process</strong> for the BambouAI management bots on <strong>Discord</strong> and
+<strong>Telegram</strong>:</p>
+<ul>
+<li>presets: duplicate, edit, rename-with-migration</li>
+<li>assistant API keys</li>
+<li>GetMySocial direct links and click stats</li>
+<li>per-platform owner/approved-user permissions</li>
+</ul>
+<p>It replaces the two separate entry points in <code>../BambouBotAI/</code> (<code>bambou_bot.js</code> +
+<code>telegram_bot.js</code>) and its dependency on <code>extras/GetMySocial</code>.</p>
+<pre><code class="language-bash">npm start                  # every platform that has a token in .env
+npm run start:discord      # only Discord   (node index.js --only discord)
+npm run start:telegram     # only Telegram
+npm test                   # offline test suite (no tokens, no network)
+</code></pre>
+</section><section id="setup"><h2>Setup</h2>
+<ol>
+<li>Node.js <strong>18+</strong>. The only dependency is <code>discord.js</code>:
+   <code>npm ci</code> (<code>node_modules</code> is already installed here).</li>
+<li><code>cp .env.example .env &amp;&amp; chmod 600 .env</code>, then fill it in. Required:
+   - <code>BAMBOU_LOGIN_KEY</code>
+   - for each bot you want: its token and owner ID (<code>DISCORD_TOKEN</code> + <code>DISCORD_OWNER_ID</code>, <code>TELEGRAM_TOKEN</code> + <code>TELEGRAM_OWNER_ID</code>)</li>
+</ol>
+<p>Optional:
+   - <code>GMS_COOKIE</code>, <code>GMS_TEAM_ID</code> for <code>/gms</code> (see <code>docs/GETTING_COOKIE.md</code>)
+   - <code>DISCORD_GUILD_ID</code>
+   - <code>ACCESS_FILE</code></p>
+<p>A platform starts only when its token is set.
+3. <code>npm start</code>. For usage on each platform, see <code>docs/PLATFORMS.md</code>.</p>
+<p>Configuration errors are all reported together on startup, and the process exits
+with status 1. Real environment variables override <code>.env</code>. <code>BAMBOU_ENV_FILE</code>
+selects another file.</p>
+</section><section id="how-it-is-organised"><h2>How it is organised</h2>
+<pre><code>index.js                      CLI entry: parses --only, loads config, runs the app, handles SIGINT/SIGTERM
+src/
+  config.js                   .env + environment → one validated config object
+  app.js                      composition root: one studio session, cache, GMS client and access store,
+                              shared by every platform; a failing platform doesn't stop the others
+  core/                       pure building blocks (no platform code)
+    access.js                 one access file, platform-scoped (discord:&lt;id&gt; / telegram:&lt;id&gt;)
+    presets.js                preset duplicate/edit builder, URL upsert, id migration
+    fields.js                 field specs + validators: the single source of input limits
+    cache.js, sessions.js     versioned config cache, TTL form sessions
+    errors.js, audit.js       redaction, error text, one audit-log format
+    format.js                 splitting, pagination, plain/markdown styles
+  services/                   business operations used by both platforms
+    presets.js keys.js gms.js access.js
+    render.js                 shared wording (plain text for Telegram, markdown for Discord)
+  clients/bambou.js           BambouAI HTTP client (studio session, assistant, extension)
+  vendor/getmysocial/         vendored GetMySocial session client + service (config injected)
+  platforms/
+    discord/                  slash commands built from the field specs, modals, embeds, DM delivery
+    telegram/                 Bot API transport (long polling), parser, reply-based forms, inline keyboards
+scripts/
+  migrate-access.js           legacy access.json + telegram-access.json → one access file
+  smoke.js                    live read-only check against BambouAI (npm run smoke)
+test/                         node:test suites, fully offline against local HTTP mocks
+docs/                         PLATFORMS.md, GETTING_COOKIE.md, REVERSE_ENGINEERING.md, preset_schema.md,
+                              reference/ (captured openapi.json, routes, dashboard bundle)
+</code></pre>
+<p>To add a feature:</p>
+<ol>
+<li>Put its logic in <code>src/services/</code>.</li>
+<li>Put its limits in <code>src/core/fields.js</code>.</li>
+<li>Add a thin handler in each <code>src/platforms/*/bot.js</code>.</li>
+</ol>
+<p>Platform adapters never call the BambouAI or GetMySocial clients directly.</p>
+</section><section id="hub-integration"><h2>Hub integration</h2>
+<p>The optional <code>hub</code> module controls Bambou Hub sites from Discord and Telegram and
+delivers hub alerts. It is off unless both variables are set:</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HUB_URL</code></td>
+<td>hub base URL, e.g. <code>https://bamboubot.duckdns.org</code></td>
+</tr>
+<tr>
+<td><code>HUB_BOT_TOKEN</code></td>
+<td>bot service token <code>hbt_…</code> (hub: <code>POST /api/service-tokens/bot</code>, needs <code>bots:manage</code>)</td>
+</tr>
+<tr>
+<td><code>HUB_ALERTS</code></td>
+<td><code>false</code> turns alert delivery off (default <code>true</code>)</td>
+</tr>
+<tr>
+<td><code>HUB_ALERT_INTERVAL_MS</code> / <code>HUB_TIMEOUT_MS</code></td>
+<td>poll interval (default 20000) / request timeout (default 15000)</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Permissions and linking.</strong> <code>access.json</code> still governs <code>/preset</code>, <code>/key</code>, <code>/gms</code> and
+<code>/access</code>. Hub commands use the permissions of the <strong>linked hub user</strong>: the bot sends
+its token plus <code>X-Bot-User: &lt;platform&gt;:&lt;id&gt;</code>, and the hub checks every call itself
+(a 403 is shown as "Your hub account lacks the <code>&lt;permission&gt;</code> permission").
+To link, generate a code in the dashboard (Profile → link a chat account, valid 10
+minutes, single use) and send <code>/hub link &lt;code&gt;</code>; <code>/hub unlink</code> removes the link.
+An unlinked user gets a one-line instruction instead of hub data.</p>
+<p><strong>Commands</strong> (Discord <code>/hub &lt;sub&gt; option:value</code>; Telegram <code>/hub &lt;sub&gt; args</code>, positional
+or <code>key=value</code>, values with spaces quoted):</p>
+<pre><code>sites                         info site            stats [site] [period]
+start|pause|resume site       stop|restart site    (confirmation)
+workers site                  logs site [level] [limit]     errors site [limit]
+costs [site] [period]         balances [site]      proxies site
+files site                    show site path       set site path key value (confirmation)
+alerts                        ack id               mute id [minutes]
+backup site                   link code            unlink
+rules                         whoami               (/hub alone on Telegram: menu)
+</code></pre>
+<p><code>stop</code>, <code>restart</code> and <code>set</code> show the site's live health and worker counts and wait for
+a confirmation (button on Discord; button or reply <code>yes</code> on Telegram). Replies fit
+Discord's 2000 / Telegram's 4096 characters: lists are truncated with a note, logs page
+with an <strong>Older</strong> button (keyset, no gaps), alerts page by 10 with <strong>Ack</strong> buttons, and the
+file list has <strong>Show</strong> buttons. File contents are always masked by the hub.</p>
+<p><strong>Alert delivery.</strong> <code>src/services/hub-alerts.js</code> polls <code>GET /api/bot/deliveries</code>,
+sends each alert to the channel the hub chose — Discord <code>guildId:channelId</code>, Telegram
+<code>chatId</code> (or <code>chatId:topicId</code>) — and reports <code>POST /api/bot/deliveries/{id}</code> with
+<code>{ok, error}</code>. A hub outage is logged and retried with exponential backoff (max 5 min);
+it never stops the bots. A channel on a platform this process does not run is
+reported as failed so the hub can retry or show it.</p>
+<p>Code: <code>src/clients/hub.js</code> (HTTP + error mapping), <code>src/services/hub.js</code> (API calls,
+validation), <code>src/services/hubcommands.js</code> (shared command layer),
+<code>src/core/hubformat.js</code> (text), <code>src/platforms/{discord,telegram}/hub.js</code> (UX).</p>
+</section><section id="behaviour-changes-compared-with-bamboubotai"><h2>Behaviour changes compared with BambouBotAI</h2>
+<p>Where the two old bots behaved differently, both now use the safer behaviour:</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th></th>
+<th>Now</th>
+<th>Before</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Retries</td>
+<td>Only reads (GET) are retried. POST/PUT/PATCH/DELETE are never replayed</td>
+<td>Discord retried mutations, so a network error could create a second key</td>
+</tr>
+<tr>
+<td>Discord key secret</td>
+<td>DM, then ephemeral fallback. If both fail, the key is revoked</td>
+<td>The key could be left orphaned</td>
+</tr>
+<tr>
+<td>Discord input limits</td>
+<td>rpm 1–600, concurrent 1–8, daily 1–100000, label ≤ 60, http(s) URLs, scope deduped and ≤ 100, preset-ID collision checked at step 1 (with a <strong>Fix</strong> button)</td>
+<td>Not enforced</td>
+</tr>
+<tr>
+<td>Discord platforms</td>
+<td>All 29, via autocomplete</td>
+<td>25 (Unlockd, FanTime, Ifans and Unfiltrd were missing)</td>
+</tr>
+<tr>
+<td>Discord <code>/access add</code></td>
+<td>All 7 permission combinations</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Discord <code>/gms delete</code></td>
+<td>Confirmation button; <code>confirm:true</code> still skips it</td>
+<td>A <code>confirm</code> boolean was required</td>
+</tr>
+<tr>
+<td>Discord long replies</td>
+<td>Split into several messages</td>
+<td>Cut at 1990 characters</td>
+</tr>
+<tr>
+<td>Discord stats</td>
+<td>0 % CTR and "0 with clicks" are shown</td>
+<td>Hidden</td>
+</tr>
+<tr>
+<td>Access file</td>
+<td>One file for both platforms. A corrupt or invalid file means refuse to start, never overwrite</td>
+<td>Discord silently reset a corrupt file</td>
+</tr>
+<tr>
+<td>Owner override</td>
+<td>Logged as a warning on both platforms</td>
+<td>Telegram changed it silently</td>
+</tr>
+<tr>
+<td>Audit log</td>
+<td>Same format on both: <code>[audit] platform= user= chat= action=</code>, redacted, single line</td>
+<td>Discord logged <code>cmd=undefined</code> on modals and didn't redact</td>
+</tr>
+<tr>
+<td>Telegram platform field</td>
+<td>Must be a listed platform (an unlisted existing value can still be kept)</td>
+<td>Accepted any value equal to the current one</td>
+</tr>
+<tr>
+<td>Config saves</td>
+<td>One process means both bots' preset saves are serialised</td>
+<td>Two processes could overwrite each other</td>
+</tr>
+<tr>
+<td>Client error messages</td>
+<td>English</td>
+<td>Some were in French</td>
+</tr>
+<tr>
+<td>Cookie guide</td>
+<td><code>docs/GETTING_COOKIE.md</code></td>
+<td>Two different paths</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="moving-over-from-bambouaibot-not-done-yet"><h2>Moving over from BambouAIBot (not done yet)</h2>
+<p>Nothing in <code>../BambouBotAI/</code>, <code>extras/</code> or systemd was changed. <code>.env</code> here was filled
+by copying the values from <code>BambouBotAI/.env</code> and <code>extras/GetMySocial/.env</code>. When
+you're ready:</p>
+<pre><code class="language-bash">cd /root/Projects/BambouBOT/BOTS/BambouBot
+
+# 1. Merge the live approvals (dry run first, then write):
+npm run migrate:access -- --discord /var/lib/bambou-discord/access.json \
+  --telegram /var/lib/bambou-telegram/telegram-access.json --out /var/lib/bambou/access.json
+sudo mkdir -p /var/lib/bambou &amp;&amp; sudo chmod 700 /var/lib/bambou
+npm run migrate:access -- --discord /var/lib/bambou-discord/access.json \
+  --telegram /var/lib/bambou-telegram/telegram-access.json --out /var/lib/bambou/access.json --write
+
+# 2. Stop the old bots. Telegram allows only one poller per token.
+sudo systemctl disable --now bambou-discord bambou-telegram
+
+# 3. Install and start the unified service:
+sudo cp bambou.service /etc/systemd/system/bambou.service
+sudo systemctl daemon-reload &amp;&amp; sudo systemctl enable --now bambou
+journalctl -u bambou -f
+</code></pre>
+<p>The unit uses the same hardening as the old ones. State lives in <code>/var/lib/bambou/</code>
+(<code>ACCESS_FILE</code> is set in the unit), and the project folder is mounted read-only.</p>
+<p>To roll back:</p>
+<pre><code class="language-bash">sudo systemctl disable --now bambou
+sudo systemctl enable --now bambou-discord bambou-telegram
+</code></pre>
+<p>The old access files are never modified.</p>
+</section><section id="tests"><h2>Tests</h2>
+<p><code>npm test</code> runs about 100 offline tests against local HTTP mocks:</p>
+<ul>
+<li><code>core.test.js</code>: preset builder, validators, formatting, sessions, cache, redaction, config</li>
+<li><code>access.test.js</code>: platform isolation, corrupt-file refusal, owner override, migration script</li>
+<li><code>client.test.js</code>: GET-only retries, re-login, serialised config writes</li>
+<li><code>services.test.js</code>: preset/key/GMS services and shared renderers</li>
+<li><code>telegram.test.js</code>: the full original Telegram suite, ported</li>
+<li><code>discord.test.js</code>: the router, preset modal flow, key delivery and revoke, access, GMS, splitting</li>
+<li><code>app.test.js</code>: one login shared by both platforms, failure isolation, <code>--only</code>, CLI errors</li>
+<li><code>hub.test.js</code>: hub client headers/error mapping, commands (403, unlinked, truncation, pagination),
+  Discord/Telegram confirmations and buttons, linking, alert poller (delivery, failures, hub down)</li>
+</ul>
+<p><code>npm run smoke</code> is a live, read-only check against BambouAI.
+<code>npm run smoke -- --write</code> creates and removes a test preset and key.</p></section></main>
+<footer>Published from HubDashboard-v2/BambouBot/README.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Script starters (hub v2) – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Script starters (hub v2)</h1><p>HUB v2 documentation · <code>templates/v2/README.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/templates/v2/README.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>Two equivalent, runnable starters for a new automation script:</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Folder</th>
+<th>Language</th>
+<th>Entry point</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>python/</code></td>
+<td>Python 3.9+ (standard library only)</td>
+<td><code>main.py</code></td>
+</tr>
+<tr>
+<td><code>node/</code></td>
+<td>Node.js 18+ (no dependencies)</td>
+<td><code>main.js</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Both run out of the box with a <strong>simulated</strong> task, so you can watch everything
+appear in the dashboard before writing any real code. The simulated task produces:
+* 2 workers
+* logs
+* <code>tasks_completed</code>, <code>links_sent</code> and <code>messages</code> metrics
+* captcha and AI costs
+* proxy health
+* a <code>refresh_sessions</code> custom command</p>
+<p>Both starters were tested this way against the live hub.</p>
+</section><section id="what-to-replace"><h2>What to replace</h2>
+<p>Search the file for <code>TODO</code>. In order:</p>
+<ol>
+<li><strong>Settings</strong> (<code>Settings.reload</code> / <code>settings.reload</code>): read the values your script needs
+   from <code>config.json</code>, <code>.env</code> and <code>proxies.txt</code>. These files are editable from the hub.
+   Your script is told when they change (<code>on_config_change</code> / <code>onConfigChange</code>), and
+   the settings reload automatically.</li>
+<li><strong>Prices</strong> (<code>set_price</code> / <code>setPrice</code>): your providers and unit prices. Or pass an
+   exact amount each time: <code>hub.add_cost(0.0021, provider="openai", category="ai")</code>.</li>
+<li><strong><code>open_session</code> / <code>openSession</code></strong>: create one worker's browser, page or HTTP session.</li>
+<li><strong><code>do_task</code> / <code>doTask</code></strong>: one unit of work. Delete the simulation block, then:
+   * call <code>hub.add_cost(...)</code> wherever money is spent
+   * call <code>hub.proxy(label, state, url=proxy)</code> when you learn whether a proxy worked
+   * raise <code>TaskFailed</code> for an expected failure; the worker keeps going, and after 5
+     failures in a row it raises a hub issue that's forwarded to Discord/Telegram</li>
+<li><strong><code>close_session</code> / <code>closeSession</code></strong>.</li>
+<li><strong>Commands</strong>: implement <code>refresh_sessions</code> or delete it, and add your own with
+   <code>hub.on_command(...)</code> / <code>hub.onCommand(...)</code>. They appear in the dashboard and as
+   <code>/hub</code> bot commands.</li>
+<li><strong>Balances</strong> (optional): report provider balances with <code>hub.balance(...)</code> to get
+   low-balance alerts.</li>
+</ol>
+<p>Everything else stays as-is:
+* the worker loop
+* pause/resume
+* live worker count ("Set workers" in the hub)
+* graceful stop
+* crash reporting</p>
+</section><section id="set-up-a-new-script"><h2>Set up a new script</h2>
+<pre><code class="language-bash">cp -r templates/v2/python /opt/scripts/mysite        # or templates/v2/node
+cd /opt/scripts/mysite
+cp .env.example .env &amp;&amp; chmod 600 .env
+mkdir -p vendor &amp;&amp; cp -r /opt/bambou-agent/sdk/python/bambouhub vendor/   # Node: cp -r .../sdk/node vendor/bambouhub
+</code></pre>
+<p>Then run it under <code>bambou-agent</code> with <code>--file config.json --file .env --file proxies.txt</code>;
+see <a href="/hub-docs/docs/v2/INTEGRATION.html">docs/v2/INTEGRATION.md</a>.</p>
+</section><section id="moving-an-existing-script-onto-the-hub"><h2>Moving an existing script onto the hub</h2>
+<p>You don't have to rewrite it into this template. The minimum (from INTEGRATION.md):</p>
+<ol>
+<li>Read keys, counts and proxies from <code>config.json</code> / <code>.env</code> / <code>proxies.txt</code>.</li>
+<li>Add <code>from bambouhub import hub; hub.install_logging()</code>.</li>
+<li>Wrap each worker's loop in <code>with hub.worker(name) as w:</code>.</li>
+<li>Add <code>hub.add_cost(...)</code> next to paid calls and <code>hub.proxy(...)</code> where proxy results are known.</li>
+<li>Run it under <code>bambou-agent</code>.</li>
+</ol>
+<p>Use the template as a reference for the details.</p></section></main>
+<footer>Published from HubDashboard-v2/templates/v2/README.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

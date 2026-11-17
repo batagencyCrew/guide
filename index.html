@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bambou Project – Onboarding</title>
+<meta name="theme-color" content="#173c30">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="guide.css">
+<script src="guide.js" defer></script>
+</head>
+<body>
+<header>
+<h1>Bambou Project – Onboarding</h1>
+<p>Maintained by BIPRO</p>
+</header>
+<nav>
+<a href="index.html"><strong>Overview</strong></a>
+<a href="research.html"><strong>Research →</strong></a>
+<a href="hub.html"><strong>Dashboard / HUB</strong></a>
+</nav>
+<nav>
+<a href="#what">1. What this work is for</a>
+<a href="#funnel">2. Marketing flow</a>
+<a href="#workflow">3. Workflow</a>
+<a href="#done">4. Done per site</a>
+<a href="#freedom">5. Tech freedom</a>
+<a href="#api">6. AI API</a>
+<a href="#hub">6a. Dashboard / HUB</a>
+<a href="#infra">7. Proxies / VPS</a>
+<a href="#pay">8. Hours / Pay</a>
+<a href="#start">9. Start checklist</a>
+<a href="#dodont">10. Do / Don't</a>
+</nav>
+<main>
+<section id="what">
+<h2>1. What this work is for</h2>
+<p>We build AI-powered conversational marketing automations for public random-chat / dating-chat sites (Omegle-likes, etc.). The agents use Bambou's AI model (<code>bambouaibot.com</code> – custom AI chat companions like Lina, Louise) to introduce relevant services and share promotional links with interested users.</p>
+<p>Your work as dev:</p>
+<ol>
+<li>Reversing websites</li>
+<li>Making automations (bots)</li>
+<li>General tasks</li>
+<li>Other developer work</li>
+</ol>
+<p>Most of the work is done using AI – basically vibe coding. You don't have to do everything manually.</p>
+</section>
+<section id="funnel">
+<h2>2. High-level marketing flow</h2>
+<pre>chat site automation (you build) -&gt; conversation powered by Bambou AI -&gt; relevant promotional link -&gt; interested user explores the service</pre>
+<p>The purpose is marketing and service discovery, not persuading users to buy a subscription. Users decide whether to visit a linked service or take any further action.</p>
+<p>Where direct links are unavailable, an assigned Snapchat account may serve as an intermediate marketing channel.</p>
+</section>
+<section id="workflow">
+<h2>3. Workflow per site – step by step</h2>
+<ol>
+<li><strong>Pick a site.</strong> Check the shared sheet <code>CHAT ONLINE LIST</code> for untaken sites. Then research the site you picked (SimilarWeb also works for traffic/session-time). After that, SKIP SITES WITH &lt;~15 online users. Ask if unsure. Example starters: Camsurf (text-only), Chatrandom, Chat-fr, Whisperly, Chitchat.gg, Y99.in, etc.</li>
+<li><strong>Manual research first – <a href="research.html">full steps on Research page</a>.</strong> Open the site as a normal user. Understand:
+<ul>
+<li>signup vs guest-chat flow</li>
+<li>how chat transport works (websocket / polling / HTTP)</li>
+<li>skip/next behavior, rate limits, captchas, bans</li>
+<li>average session time via SimilarWeb (Engagement Overview → Average Visit Time) – goal is ~1 real convo per session.</li>
+<li>whether the site supports sharing promotional links in chat – the marketing flow needs a way for interested users to reach the relevant social profile or service. If links are unavailable and there is no assigned alternative channel, the site is not suitable for this workflow.</li>
+</ul></li>
+<li><strong>Build automation – prototype first:</strong>
+<ul>
+<li>Get the very first working prototype as fast as possible before adding any extras.</li>
+<li>Prefer pure HTTP (<code>requests</code>, <code>httpx</code>, <code>socketio</code>, <code>beautifulsoup4</code>) when possible.</li>
+<li>Use <code>playwright</code> / headed browser via <code>xvfb</code> + extensions only as last resort.</li>
+<li>Must handle skip/next, avoid bot-to-bot matches (e.g. scrape assigned IDs where available).</li>
+<li>Multithreaded / parallel workers – Bambou calls this "multithreading". Target 50-100 simultaneous accounts per site.</li>
+</ul></li>
+<li><strong>Wire to Bambou AI API</strong> (see §6). You will get the list of presets either in the docs or as a response to a specific API call. Use the preset assigned for your site.</li>
+<li><strong>Integrate the Dashboard / HUB v2 as well</strong> (see <a href="hub.html">setup, v2 documentation, and starter downloads</a>). Run <code>bambou-agent</code> with <code>HUB_URL=https://bamboubot.duckdns.org</code> and your site token, and import the <code>bambouhub</code> Python or Node.js SDK in your script to report workers, logs, metrics, costs, proxy health, config/proxy sync, commands, issues, and backups. The HUB is separate from the Bambou AI API; both integrations are required.</li>
+<li><strong>Proxies + hosting.</strong> Test with proxies from day one. Don't develop only on datacenter IP then wonder why it gets blocked.</li>
+<li><strong>Get a VPS when script is ready.</strong> Tell BIPRO/Bambou – Bambou pays for VPS. "Dedicated VPS" here just means: a VPS meant only and only for that very specific site and not for anything else.</li>
+<li><strong>Ask your AI agent for VPS specs.</strong> At the end of your AI coding chat, ask: "what specs are needed to run at least 50 workers and max 100 workers of this automation?" Send that estimate when requesting the VPS.</li>
+<li><strong>Update sheets + handoff.</strong> Log progress in the shared sheet. When swapping AI chats, write a short <code>.md</code> handoff so context isn't lost.</li>
+</ol>
+<p><span class="badge">Tracking managed by BIPRO / Bambou – you don't need to do anything for it</span></p>
+</section>
+<section id="done">
+<h2>4. Done per site</h2>
+<p>A site is DONE when:</p>
+<ul>
+<li>working automation with successful chatting on the site,</li>
+<li>successfully using proxies,</li>
+<li>successfully using the AI API,</li>
+<li>successfully integrated with the <a href="hub.html">Dashboard / HUB v2</a>: <code>bambou-agent</code> + <code>bambouhub</code> SDK connected, worker health &amp; logs visible, start/stop/restart/pause/set_workers working, config/env/proxies syncing, real metrics/costs/proxy health reported, and cloud backups verified,</li>
+<li>automation is deployed and in working condition (chatting on all workers/threads) in the VPS given/taken.</li>
+</ul>
+<p>No manual demo with your own IP + hardcoded replies = not done.</p>
+</section>
+<section id="freedom">
+<h2>5. Tech freedom</h2>
+<p>Bambou only cares about working automations for the sites. Devs have freedom for whatever they do / however they do it.</p>
+<p>So one codebase per site, shared tooling, separate repo, whatever – never really thought of, just do what works. "He only wants it working. Doesn't matter how."</p>
+<ul>
+<li>Hosting VPS are Ubuntu Linux (headless) running on 24.04. No full-desktop RDP assumption. Use systemd services, env files (root-readable) for secrets.</li>
+<li>Don't commit secrets (keys, proxy URLs, logins) to code. Use env files.</li>
+</ul>
+</section>
+<section id="api">
+<h2>6. AI API &amp; presets</h2>
+<p>Full reference is in the official docs – read those, don't guess:</p>
+<ul>
+<li>Site: <code>https://bambouaibot.com</code></li>
+<li>Docs: <code>https://bambouaibot.com/api-docs.html</code></li>
+<li>OpenAPI: <code>https://bambouaibot.com/openapi.json</code></li>
+<li>Routes: <code>GET /api/assistant/presets</code>, <code>POST /api/assistant/generate</code></li>
+</ul>
+<ul>
+<li>AI API can be implemented from the docs.</li>
+<li>You will get the list of presets either in the docs or as a response to a specific API call.</li>
+<li>API keys and other credentials are NOT given right away – gradually provided as you progress.</li>
+<li>You don't need to do ANYTHING related to getmysocial – that's our work (integrated into the AI).</li>
+</ul>
+</section>
+<section id="hub">
+<h2>6a. Dashboard / HUB v2 — required</h2>
+<p>Every site automation must integrate with the Bambou Automation Hub v2 as well as the Bambou AI API. The HUB supervises scripts via <code>bambou-agent</code> + the <code>bambouhub</code> SDK (workers, logs, metrics, costs, proxy health, config/env/proxy sync, commands, alerts, and cloud backups); it does not replace the AI API or implement your site's chat logic.</p>
+<ul>
+<li>Dashboard and public origin: <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a></li>
+<li>Configure <code>bambou-agent</code> with <code>HUB_URL=https://bamboubot.duckdns.org</code> and your site's <code>hst_...</code> token (in <code>/etc/bambou-agent/&lt;site&gt;.conf</code>, mode <code>0600</code>). Your script talks to the agent over a local Unix socket via the <code>bambouhub</code> SDK and never holds the token.</li>
+<li>One <code>bambou-agent</code> per site token.</li>
+<li><a href="hub.html">Read the HUB v2 integration guide</a> for setup, acceptance checks, the full v2 documentation library, and the download package (<code>agent2/</code>, Python &amp; Node.js SDKs, and <code>templates/v2/</code> starters).</li>
+</ul>
+</section>
+<section id="infra">
+<h2>7. Proxies, VPS, accounts, captchas</h2>
+<p>All credentials provided separately gradually as you progress.</p>
+<ul>
+<li><strong>VPS:</strong> paid by Bambou. One site = one VPS meant only for that site, nothing else. Request via BIPRO when script is ready, with your 50/100-worker spec estimate. Dev on your own machine, VPS only for hosting.</li>
+<li><strong>Proxies:</strong> prefer mobile 5G proxies (cheaper). Residential as fallback. ANY datacenter IP can get blocked by chatting websites sometimes – test with proxies early.</li>
+<li><strong>Emails:</strong> temp-mail provider (details provided separately when needed).</li>
+<li><strong>Captchas:</strong> solver service (details provided separately when needed). Do captcha-free sites first.</li>
+<li><strong>Snapchat:</strong> only if assigned. Log pre-made accounts into AdsPower profiles and note the username.</li>
+<li><strong>VPS logins sheet:</strong> new logins go in the separate VPS-logins spreadsheet.</li>
+</ul>
+</section>
+<section id="pay">
+<h2>8. Hours, pay, reporting</h2>
+<ul>
+<li>Not a company – freelance-style.</li>
+<li>Normal: 3-4h/day. Busy days: minimum 1-2h is OK if you inform.</li>
+<li>Pay talked out with Bambou directly. Weekly or monthly – your choice. Rest of salary talks with Bambou.</li>
+<li>AI credit: if you need it for the job, Bambou can provide (work use only). Own source also fine.</li>
+<li>Reporting: you report to Bambou. BIPRO only tells you the first few stuff to start.</li>
+<li>Contact: Bambou on Discord – ask BIPRO for current handle/server.</li>
+<li>Off-topic tasks possible.</li>
+</ul>
+</section>
+<section id="start">
+<h2>9. How to start</h2>
+<ul class="checklist">
+<li>Contact Bambou, settle pay (weekly/monthly + amount + method) directly with him</li>
+<li>Get sheet links + initial credentials (rest comes gradually)</li>
+<li>Pick 1 site (skip taken/small sites), finish that 1 site first</li>
+<li>Build prototype fast, meet Done criteria</li>
+<li>Ask AI agent for 50/100-worker VPS specs, request VPS</li>
+<li>Deploy in VPS, verify chatting on all workers/threads</li>
+<li>Update sheet, ask for next site</li>
+<li>Integrate the Dashboard / HUB v2 (<code>bambou-agent</code> + <code>bambouhub</code> SDK) and verify worker health/logs, lifecycle controls, config/proxy sync, metrics/costs/proxy health, and cloud backups (see <a href="hub.html">HUB v2 guide</a>)</li>
+</ul>
+</section>
+<section id="dodont">
+<h2>10. Do / Don't</h2>
+<p><strong>Do:</strong></p>
+<ul>
+<li>Honesty + loyalty, ship fast (“what can be done today, finish today”)</li>
+<li>Prototype first, extras later</li>
+<li>Test as normal user first</li>
+<li>Update sheets, write handoffs</li>
+</ul>
+<p><strong>Don't:</strong></p>
+<ul>
+<li>Share keys/logins unnecessarily, don't commit secrets</li>
+<li>Use VPS for anything else except hosting its site</li>
+<li>Spam team with personal payment issues</li>
+</ul>
+</section>
+</main>
+<footer>TODO: site list status · proxy rotation · AdsPower flow · bonus criteria</footer>
+</body>
+</html>

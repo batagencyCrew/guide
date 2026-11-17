@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>Bambou Hub v2 — dashboard – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>Bambou Hub v2 — dashboard</h1><p>HUB v2 documentation · <code>frontend/README.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/frontend/README.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>React 18 + TypeScript + Vite single-page console for the v2 hub API (<code>../docs/v2/API.md</code>).</p>
+<pre><code class="language-sh">npm install
+npm run dev      # http://localhost:5173, proxies /api and /ws to http://127.0.0.1:8000
+npm run build    # tsc -b &amp;&amp; vite build → dist/ (served by the hub)
+</code></pre>
+<ul>
+<li>Auth is the hub's HttpOnly session cookie (<code>POST /api/auth/login</code>); nothing sensitive is stored
+  client-side. Any 401 returns to <code>/login</code>. Only the last selected site tab is kept in localStorage.</li>
+<li>Routes: <code>/login</code>, <code>/</code>, <code>/sites/:ref/:tab</code>, <code>/alerts</code>, <code>/users</code>, <code>/audit</code>.</li>
+<li>Actions the user lacks permission for are hidden or disabled (mirrors <code>can_site</code> using <code>/auth/me</code>).</li>
+</ul>
+<p>Layout: <code>src/lib</code> (api client, auth, polling, formatting, types), <code>src/components</code> (UI kit, charts,
+log viewer), <code>src/pages</code> (one folder/file per route; <code>pages/site/*Tab.tsx</code> for site tabs).</p></section></main>
+<footer>Published from HubDashboard-v2/frontend/README.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>

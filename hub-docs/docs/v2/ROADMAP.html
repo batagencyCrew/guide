@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173c30">
+<title>v2 status and roadmap – Bambou HUB Docs</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/guide.css"><script src="/guide.js" defer></script>
+</head><body data-page="hub" class="reference-doc">
+<header><h1>v2 status and roadmap</h1><p>HUB v2 documentation · <code>docs/v2/ROADMAP.md</code></p>
+<p><a href="/hub.html#documentation">← Documentation library</a> · <a href="/hub-docs/docs/v2/ROADMAP.md" download>Download Markdown</a></p>
+<div class="rule"><strong>Production dashboard / HUB API:</strong> <a href="https://bamboubot.duckdns.org">https://bamboubot.duckdns.org</a><br>
+Set <code>HUB_URL=https://bamboubot.duckdns.org</code> on <code>bambou-agent</code>. Local-development commands and loopback bind addresses below are development/operator reference, not the production API origin. Use the existing hosted HUB; you do not need to deploy a new one.</div></header>
+<nav><a href="/index.html">← Overview</a><a href="/research.html">Research</a><a href="/hub.html">Dashboard / HUB</a></nav>
+<main><section id="introduction"><h2>Introduction</h2><p>v2 is <strong>live</strong> on the hub host since the switch from v1 (see <a href="/hub-docs/docs/v2/DEPLOYMENT.html">DEPLOYMENT.md</a>).</p>
+<div aria-label="Reference table" class="table-scroll" role="region" tabindex="0"><table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Scope</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Foundation</td>
+<td>Postgres schema + migrations, users/roles/permissions, sessions, audit log, bot service tokens, v1 importer</td>
+<td>✅ done</td>
+</tr>
+<tr>
+<td>2. Agent + SDK</td>
+<td><code>bambou-agent</code>, Python SDK, Node SDK, cost accumulator</td>
+<td>✅ done (real-process end-to-end test)</td>
+</tr>
+<tr>
+<td>3. Hub data &amp; control</td>
+<td>ingest, file sync, commands, proxy health, balances, WebSocket push</td>
+<td>✅ done</td>
+</tr>
+<tr>
+<td>4. Dashboard</td>
+<td>React rebuild with routing, all screens</td>
+<td>✅ done (browser smoke test)</td>
+</tr>
+<tr>
+<td>5. Alerts &amp; bots</td>
+<td>rule engine, BambouBot <code>/hub</code> module, alert delivery</td>
+<td>✅ done and running (<code>bambou.service</code>)</td>
+</tr>
+<tr>
+<td>6. Backups</td>
+<td>per-site Drive folders, retention, retries</td>
+<td>✅ done (real rclone test); no destinations configured yet</td>
+</tr>
+<tr>
+<td>7. Onboarding</td>
+<td>integration guide, Python + Node starters (<code>templates/v2</code>)</td>
+<td>✅ done; both starters tested under the agent against the live hub</td>
+</tr>
+<tr>
+<td>Cut-over</td>
+<td>v1 → v2 on the hub host</td>
+<td>✅ done; v1 kept for rollback</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="next"><h2>Next</h2>
+<ul>
+<li><strong>Move the VPSes to <code>bambou-agent</code>.</strong> The two live VPSes still run the v1 agent
+  through the compatibility API: heartbeats, logs, commands and config work, but there
+  are no per-worker SDK logs, costs, pause/resume or <code>.env</code> sync until they are moved.
+  No script has been migrated yet.</li>
+<li><strong>Configure backups.</strong> Add rclone destinations and per-site schedules in the
+  dashboard (the v1 rclone config was copied to the hub).</li>
+<li><strong>Alert channels.</strong> Set default Discord/Telegram channels under <strong>Alerts</strong>, and link
+  chat accounts with <code>/hub link</code>.</li>
+</ul>
+</section><section id="known-gaps"><h2>Known gaps</h2>
+<ul>
+<li>Dashboard features the backend already supports:</li>
+<li>account page (password change, own sessions)</li>
+<li>live <code>/ws</code> push (the UI polls every 10 s)</li>
+<li>viewing old file revisions' content (restore works)</li>
+<li>structured env/JSON edits</li>
+<li><code>reload_config</code> and custom-command buttons</li>
+<li>backup exclude editor</li>
+<li>Discord allows 25 subcommands per group, all used by <code>/hub</code>; there is no <code>users</code> command.</li>
+<li>Provider balances come only from scripts (<code>hub.balance</code>); the hub does not query providers.</li>
+</ul>
+</section><section id="decisions"><h2>Decisions</h2>
+<ul>
+<li><strong>Postgres 16 with native monthly partitions</strong> instead of TimescaleDB: already on the
+  host, no extension to install, and telemetry is kept forever.</li>
+<li><strong>One agent per VPS + thin SDK in the script.</strong> The agent:</li>
+<li>survives script crashes</li>
+<li>owns the hub connection and buffers offline</li>
+<li>does file sync and backups</li>
+</ul>
+<p>The script only talks to a local unix socket. Any worker model (threads, asyncio,
+  processes, browsers) declares workers through the SDK.
+* <strong>Bots act as linked hub users.</strong> One permission system for dashboard and chat.
+* <strong>File text is stored, not re-rendered,</strong> so <code>.env</code>/<code>proxies.txt</code> comments survive.
+* <strong>Backups classify failures:</strong>
+  * the agent does not retry permanent 4xx rejections
+  * transfers retry with backoff for up to about 3.5 h
+  * partial or failed local copies are cleaned after 72 h</p>
+<p>This fixes the v1 audit findings.
+* <strong>Site names are data, not code.</strong> Tests and examples use <code>alpha</code>/<code>beta</code>/<code>demo</code>.</p></section></main>
+<footer>Published from HubDashboard-v2/docs/v2/ROADMAP.md · <a href="/downloads/hub-starters.zip" download>Download documentation + starter package</a></footer>
+</body></html>
